@@ -912,9 +912,13 @@ function slash(x,z,ang,flip,big,scale){
   o.a.scale.x=o.b.scale.x=flip; // mirror the crescent sideways for alternating swings (never behind the knight)
 }
 function stepArcs(dt){dt=fxDt(dt);for(const o of arcs){if(o.life<=0)continue;o.life-=dt;if(o.life<=0){o.obj.visible=false;continue;}const tc=1-o.life/o.max,st=Math.min(3,Math.floor(tc*4));const s=o.size*ARC_SC[st];o.obj.scale.set(s,1,s);o.a.material.opacity=(st<3?ARC_A[st]:0)*0.95*inkMix(0.72,1);o.b.material.opacity=ARC_A[st]*0.9*inkMix(0.28,1);   /* INK_D: the crescent's INNER copy is solid ink and a charged sweep draws it five world-units wide, right under the bodies being swept. The paper crescent above it keeps the blade-path read at full strength; only this plate thins */o.obj.rotation.y=o.rot0+o.rotSpan*ARC_RO[st];}}   // four held drawings: the crescent lands, opens through its swing, dries, is gone. Nothing tweens
-// afterimages: two sprites per ghost, an ink silhouette under a paper one, so what is left behind is a line drawing of the body, not a dark copy of it.
-// (the halo sheet is the body dilated 2px, the outline stack 1px: bigger one in ink under the smaller one in paper = an ink rim round a paper shape.) Framed ghosts keep the colour body
-const mkGhost=()=>{const grp=new THREE.Group();const mk=(c,ro)=>{const s=new THREE.Sprite(new THREE.SpriteMaterial({transparent:true,alphaTest:0.05,depthWrite:false,color:c,opacity:0}));s.renderOrder=ro;grp.add(s);return s;};const body=mk(0xffffff,2),edge=mk(0x14151c,1.5);scene.add(grp);return{obj:grp,body,edge,tex:{},etex:{},max:1,framed:false,hard:false,hero:false};};
+// afterimages: two sprites per ghost. FIX3 (the user: "the ink on the player whenever he swings turns the whole model black"):
+// the edge sprite used to be the HALO sheet tinted ink -- and haloSheet is a FILLED 3px dilation of the body (12-renderer-textures),
+// so every free ghost was a solid black body silhouette at ~0.45 alpha, and the sweep printed two of them rotated IN PLACE on the hero.
+// Now a ghost is a faint LINE DRAWING: body = the bare boiling line (sheetOutlPlain, no gap/rim) at <=0.45, edge = the same halo
+// tinted PAPER at <=0.25 (a pale cut-out under the line, never ink), and the callers put it BEHIND the motion. Framed ghosts keep the colour body
+const mkGhost=()=>{const grp=new THREE.Group();const mk=(c,ro)=>{const s=new THREE.Sprite(new THREE.SpriteMaterial({transparent:true,alphaTest:0.05,depthWrite:false,color:c,opacity:0}));s.renderOrder=ro;grp.add(s);return s;};const body=mk(0xffffff,2),edge=mk(0xf2ead6,1.5);scene.add(grp);return{obj:grp,body,edge,tex:{},etex:{},max:1,framed:false,hard:false,hero:false};};
+const ghostLine=k=>(typeof sheetOutlPlain!=='undefined'&&sheetOutlPlain[k])||sheetOutl[k];   /* FIX3: the line-only stack (three boiling rows, same UV math); the gap+rim stack only if the plain one was never baked */
 const ghosts=pool(24,mkGhost), fGhosts=pool(6,mkGhost), smears=pool(6,mkGhost);   // framed afterimages never get recycled by the trail; smears are the two-frame stretched drawings of a heavy hit
 // dash motion frames: each one a different crop of the afterimage, geometry billboards, fanned stack
 // crops are fractions of the 100px sheet frame (x0,x1 from the left; y0,y1 from the top); the anchor is (0.535 from left, 0.56 from top)
@@ -1042,9 +1046,9 @@ function ghost(h,framed,fk,px,pz){const o=take(framed?fGhosts:ghosts);o.life=o.m
     if(h.flip){tx.repeat.set(-(x1-x0)/sd.n,y1-y0);tx.offset.set((idx+x1)/sd.n,1-y1);} else {tx.repeat.set((x1-x0)/sd.n,y1-y0);tx.offset.set((idx+x0)/sd.n,1-y1);}
     b.material.map=tx;warm(b);b.material.color.set(0xffffff);b.center.set(0.5,0.5);b.material.depthTest=false;b.scale.set((x1-x0)*h.w,(y1-y0)*h.h,1);b.position.set(0,0,0);b.material.rotation=f.rot;b.renderOrder=spr.sp.renderOrder-40+fk*8+5;
     o.obj.position.copy(frameAnchor(px==null?h.grp.position.x:px,pz==null?h.grp.position.z:pz,f,h.flip));ed.visible=false;}
-  else {if(!o.tex[k])o.tex[k]=cloneTex(sheetOutl[k]);if(!o.etex[k])o.etex[k]=cloneTex(sheetHalo[k]);const tx=o.tex[k],et=o.etex[k],src=h.tex[k],on=SET.sketch>0;
-    tx.repeat.set(src.repeat.x,1/OUTL_ROWS);tx.offset.set(src.offset.x,OUTL_ROWS>1?(on?BOIL.ov:0)/OUTL_ROWS:0);et.repeat.copy(src.repeat);et.offset.copy(src.offset);   // the paper body reads the boiling outline row; the ink rim the 2px halo
-    b.material.map=tx;ed.material.map=et;warm(b);warm(ed);b.material.color.set(on?0xf2ead6:0x1a1b2a);ed.material.color.set(0x14151c);b.material.depthTest=ed.material.depthTest=true;
+  else {if(!o.tex[k])o.tex[k]=cloneTex(ghostLine(k));if(!o.etex[k])o.etex[k]=cloneTex(sheetHalo[k]);const tx=o.tex[k],et=o.etex[k],src=h.tex[k],on=SET.sketch>0;
+    tx.repeat.set(src.repeat.x,1/OUTL_ROWS);tx.offset.set(src.offset.x,OUTL_ROWS>1?(on?BOIL.ov:0)/OUTL_ROWS:0);et.repeat.copy(src.repeat);et.offset.copy(src.offset);   // the line reads the boiling row; the paper cut-out the halo
+    b.material.map=tx;ed.material.map=et;warm(b);warm(ed);b.material.color.set(0xffffff);ed.material.color.set(0xf2ead6);b.material.depthTest=ed.material.depthTest=true;   /* FIX3: the line is ink already (tint cannot lighten it; opacity does, in stepGhosts); the edge is PAPER, never ink */
     for(const q of [b,ed]){q.center.copy(h.sp.center);q.scale.copy(h.sp.scale);q.position.copy(h.sp.position);q.material.rotation=h.sp.material.rotation;}
     o.obj.position.copy(h.grp.position);if(px!=null){o.obj.position.x=px;o.obj.position.z=pz;}b.renderOrder=h.sp.renderOrder-1.3;ed.renderOrder=h.sp.renderOrder-1.4;ed.visible=on;}
   return o;}
@@ -1054,15 +1058,15 @@ function smear(h,nx,nz,mode){const k=h.anim;if(!h.tex[k]||!sheetHalo[k])return;c
   camUp.set(0,1,0).applyQuaternion(camera.quaternion);camRight.set(1,0,0).applyQuaternion(camera.quaternion);
   const mid=h.sp.scale.y*(0.5-h.sp.center.y),midx=h.sp.scale.x*(0.5-h.sp.center.x);
   for(let i=(mode==='mult'?1:0);i<(mode==='one'?1:3);i++){const o=take(smears);o.life=o.max=VFX.SMEAR_T;o.framed=false;o.hard=true;o.hero=false;o.obj.visible=true;
-    if(!o.tex[k])o.tex[k]=cloneTex(sheetOutl[k]);if(!o.etex[k])o.etex[k]=cloneTex(sheetHalo[k]);const tx=o.tex[k],et=o.etex[k],src=h.tex[k];
+    if(!o.tex[k])o.tex[k]=cloneTex(ghostLine(k));if(!o.etex[k])o.etex[k]=cloneTex(sheetHalo[k]);const tx=o.tex[k],et=o.etex[k],src=h.tex[k];
     tx.repeat.set(src.repeat.x,1/OUTL_ROWS);tx.offset.set(src.offset.x,OUTL_ROWS>1?BOIL.ov/OUTL_ROWS:0);et.repeat.copy(src.repeat);et.offset.copy(src.offset);
-    const b=o.body,ed=o.edge;b.material.map=tx;ed.material.map=et;warm(b);warm(ed);b.material.color.set(0xf2ead6);ed.material.color.set(0x14151c);b.material.depthTest=ed.material.depthTest=true;
+    const b=o.body,ed=o.edge;b.material.map=tx;ed.material.map=et;warm(b);warm(ed);b.material.color.set(0xffffff);ed.material.color.set(0xf2ead6);b.material.depthTest=ed.material.depthTest=true;   /* FIX3: line + paper cut-out, same as ghost() */
     for(const q of [b,ed]){q.center.set(0.5,0.5);q.material.rotation=i?h.sp.material.rotation:-sa;q.scale.set(h.sp.scale.x*(i?1:1.9),h.sp.scale.y*(i?1:0.62),1);q.position.copy(h.sp.position).addScaledVector(camUp,mid).addScaledVector(camRight,midx);}
-    o.obj.position.copy(h.grp.position);o.obj.position.x-=nx*0.28*i;o.obj.position.z-=nz*0.28*i;
-    b.visible=i===0;ed.visible=true;o.a0=(i?0.35:0.95)*inkMix(0.72,1);   /* INK_D: the stretched drawing and its trailing multiples fade back with the dial */b.renderOrder=h.sp.renderOrder+(i?-1.3:0.4);ed.renderOrder=h.sp.renderOrder+(i?-1.4:0.3);}}
+    o.obj.position.copy(h.grp.position);o.obj.position.x-=nx*(0.32+0.28*i);o.obj.position.z-=nz*(0.32+0.28*i);   /* FIX3: EVERY copy trails behind the blow -- the stretched one used to sit ON the body */
+    b.visible=true;ed.visible=true;o.a0=(i?0.22:0.4)*inkMix(0.72,1);   /* FIX3 + INK_D: faint line drawings (was 0.95/0.35 with a solid-ink edge); the dial thins them further */b.renderOrder=h.sp.renderOrder-1.3-0.2*i;ed.renderOrder=h.sp.renderOrder-1.4-0.2*i;}}   /* FIX3: all UNDER the body (the stretched copy drew over it at +0.4) */
 function stepGhosts(dt){dt=fxDt(dt);const k=(SET.sketch>0?1:0.6)*inkMix(0.5,1);   /* INK_D (see the dial above): the free afterimage trail is the grey cloud around a swinging knight -- the dial thins every step of its fade. Hard ghosts (o.hard: the dash smear, the perfect-dodge fan) keep their own a0 */for(const p of ghostPools)for(const o of p){if(o.life<=0)continue;o.life-=dt;if(o.life<=0){o.obj.visible=false;continue;}const t=1-o.life/o.max;let a;
-    if(o.framed)a=t>0.88?1-easeIn((t-0.88)/0.12):1; else if(o.hard)a=o.a0||1; else if(o.hero)a=[0.55,0.28][Math.min(1,Math.floor(t*2))]*k; else a=[0.9,0.6,0.3][Math.min(2,Math.floor(t*3))]*k;   // afterimages fade in hard steps, never a tween
-    o.body.material.opacity=a;o.edge.material.opacity=a;}}
+    if(o.framed)a=t>0.88?1-easeIn((t-0.88)/0.12):1; else if(o.hard)a=Math.min(0.45,o.a0||1); else if(o.hero)a=[0.42,0.2][Math.min(1,Math.floor(t*2))]*k; else a=[0.5,0.32,0.16][Math.min(2,Math.floor(t*3))]*k;   // afterimages fade in hard steps, never a tween. FIX3: the line never above 0.45 (hero 0.34/0.16 at INK_D 0.62)
+    o.body.material.opacity=a;o.edge.material.opacity=o.framed?a:Math.min(0.25,a*0.6);}}   /* FIX3: the paper cut-out under the line stays a whisper */
 function behindDecor(x,z){const ps=(typeof camPitchK==='number'&&camPitchK!==0)
     ? Math.sin(camPitchK>0
         ? Math.atan2(lerp(T.CAM_OFF.y,CAMF.PITCH_Y,camPitchK),lerp(T.CAM_OFF.z,CAMF.PITCH_Z,camPitchK))
@@ -1103,10 +1107,10 @@ function numPos(n){const t=n.t/n.life;const rise=n.oy-easeOut(Math.min(1,t*1.6))
 function dmgNum(x,z,n,heavy,red,tgt,ally,crit,heal,en){const R=Math.random; n=Math.round(n); if(n<=0)return;   // the sim keeps its fractions (armor bleeds them in); the page shows a number, never 11.941666666666666
 
   // rapid hits on the same target add up in one number that re-pops where it is, instead of stacking five numbers on top of each other
-  if(tgt){const ex=M.nums.find(q=>q.tgt===tgt&&q.t<0.55);if(ex){const [cx,cy]=numPos(ex);ex.val=String((parseInt(ex.val)||0)+n)+(crit||ex.crit?'!':'');ex.crit=ex.crit||!!crit;ex.big=ex.big||heavy;ex.sx=cx;ex.sy=cy;ex.ox=0;ex.oy=0;ex.fx*=0.45;ex.fy=Math.min(ex.fy,-24*S);ex.t=0.12;ex.life=0.8;ex.merge=0.2;ex.settled=true;return;}}
+  if(tgt){const ex=M.nums.find(q=>q.tgt===tgt&&q.t<0.55);if(ex){const [cx,cy]=numPos(ex);ex.val=String((parseInt(ex.val)||0)+n)+(crit||ex.crit?'!':'');ex.crit=ex.crit||!!crit;ex.merges=(ex.merges||0)+1;ex.big=ex.big||heavy||ex.merges>=2;ex.sx=cx;ex.sy=cy;ex.ox=0;ex.oy=0;ex.fx*=0.45;ex.fy=Math.min(ex.fy,-24*S);ex.t=0.12;ex.life=0.8;ex.merge=0.22;ex.settled=true;return;}}   /* FIX3: a merged number re-pops harder and GROWS with each hit folded in (drawNums reads merges); by the third hit it is drawn big */
   const top=tgt&&tgt.cfg?tgt.cfg.drawH*1.25+(tgt.hy||0):(tgt===P?2.4:1.3),[bx,by]=toScreen(x,top,z);   // straight over the head
   for(const q of M.nums){ if(tgt&&q.tgt===tgt){q.oy+=22*S;continue;} const [qx,qy]=numPos(q); if(Math.abs(qx-bx)<38*S&&Math.abs(qy-by)<26*S)q.oy+=22*S; }   /* an older number is bumped up out of the way -- on the same body OR merely on the same spot on the page. A sweep through three bodies used to print '46!' and '2!' exactly on top of each other, which is the one number the player is trying to read */
-  M.nums.push({x,z,tgt,ally:!!ally,heal:!!heal,en:!!en,val:(heal||en?'+':'')+String(n)+(crit?'!':''),crit:!!crit,t:0,life:heavy?0.7:0.55,big:heavy,red:!!red,dx:0,sx:bx,sy:by,ox:(R()-0.5)*10*S,oy:0,fx:(R()-0.5)*6*S,fy:-26*S,rot:0,merge:0,seed:Math.floor(R()*1e4)});if(M.nums.length>(engagedCount()>=3?4:5))M.nums.shift();}   // launches in a random direction, mostly upward
+  M.nums.push({x,z,tgt,ally:!!ally,heal:!!heal,en:!!en,val:(heal||en?'+':'')+String(n)+(crit?'!':''),crit:!!crit,t:0,life:heavy?0.7:0.55,big:heavy,red:!!red,dx:0,sx:bx,sy:by,ox:(R()-0.5)*10*S,oy:0,fx:(R()-0.5)*6*S,fy:-26*S,rot:0,merge:0,merges:0,seed:Math.floor(R()*1e4)});if(M.nums.length>(engagedCount()>=3?4:5))M.nums.shift();}   // launches in a random direction, mostly upward
 // renderUpdate calls stepDmg(rdt) right after the particle pools and before the actor loop. The name is legacy (damage numbers moved to the ink layer); the slot is where every non-particle effect steps now (stepVfx, 15b-decals.js)
 function stepDmg(rdt){stepVfx(rdt);}
 // ---- a new run wipes the world's effects. Every pool here is a fixed ring of live objects: park them, never truncate.
@@ -1557,7 +1561,7 @@ const AudioSys=(()=>{
 addEventListener('focus',()=>{try{const c=AudioSys.live();if(c&&c.state==='suspended')c.resume();}catch(e){}});
 document.addEventListener('visibilitychange',()=>{try{ if(document.hidden)music.hold(true); else {music.hold(false);const c=AudioSys.live();if(c&&c.state==='suspended')c.resume();} }catch(e){}});   // Safari and iOS suspend a backgrounded context; the scheduler stops so it never bursts on return
 // ---------------- state ----------------
-const CLS={knight:{idle:'knightIdle',walk:'knightWalk',attack:'knightAttack',death:'knightDeath',feet:0.44,cx:0.535,ranged:false,crop:[0.405,0.565,0.34,0.60]},archer:{idle:'archerIdle',hurt:'undeadHurt',walk:'undeadWalk',attack:'undeadAttack',death:'undeadDeath',feet:0.415,cx:0.52,ranged:true,crop:[0.41,0.63,0.34,0.62]}};
+const CLS={knight:{idle:'knightIdle',walk:'knightWalk',attack:'knightAttack',death:'knightDeath',feet:0.44,cx:0.535,ranged:false,crop:[0.405,0.565,0.34,0.60]},archer:{idle:'undeadWalk',hurt:'undeadHurt',walk:'undeadWalk',attack:'undeadAttack',death:'undeadDeath',feet:0.415,cx:0.52,ranged:true,crop:[0.41,0.63,0.34,0.62]}};
 const SHOOT={kind:'shoot',wind:6/14,active:0.07,rec:0.09,dmg:0,reach:0,lunge:0,stop:0,shake:0,knock:0,cancel:0.02,move:0.0,fps:14,big:false,arrowDmg:9};   // short recovery, move-cancel the moment the arrow is away
 const P={cls:'knight',armor:30,energy:100,sinceHurt:9,aiming:false,charging:false,charge:0,chargeAt:0,chargeFull:false,bufSweep:false,perfect:0,perfectCd:0,x:0,z:0,px:0,pz:0,vx:0,vz:0,aimx:1,aimz:0,facing:1,
   hp:T.HP,dead:false,deadT:0,iframes:0,hurtT:0,
@@ -3293,7 +3297,8 @@ function companionRender(rdt,adt,alpha){
   sp.flip=AR.dir<0; sp.grp.position.set(vx,0,vz); sp.setZ(vz); occlusionTint(sp,vx,vz,rdt);
   const st=AR.atkT>=0?1:AR.moving?2:3, newSt=st!==AR._pSt; AR._pSt=st;   // a new state is a new drawing, now
   if(st===1){ sp.play('undeadAttack'); const f=Math.floor(AR.atkT*14); sp.show(f<5?f:f<7?5:f-1); }   // the draw, the full draw held two ticks, then the loose
-  else { sp.play(st===2?'undeadWalk':(SHEETS.archerIdle?'archerIdle':'undeadWalk')); AR.tickAcc+=adt; if(ANIM.step||newSt||!sp.posed){sp.tick(AR.tickAcc);AR.tickAcc=0;} }   // sheet frames land on the pose beat; her idle is its own sheet (on threes, with holds) instead of a held walk frame
+  else if(st===2){ sp.play('undeadWalk'); AR.tickAcc+=adt; if(ANIM.step||newSt||!sp.posed){sp.tick(AR.tickAcc);AR.tickAcc=0;} }   // sheet frames land on the pose beat
+  else { sp.play('undeadWalk'); AR.tickAcc=0; sp.show(0); }   /* FIX3: one sheet family per body. She idles on a HELD walk frame (the hero's archer does the same) -- idling on archerIdle (the elf) and walking on undeadWalk (the skeleton) swapped characters at every stop and start; the first fix swapped the sheet but kept ticking the walk, so she marched on the spot */
   const newF=sp.frame!==AR._pF; AR._pF=sp.frame;
   if(ANIM.step&&AR.shotTick>0)AR.shotTick--;
   const rec=AR.shotTick>0, rp=st===2?AR_POSE[sp.frame&7]:null;   // the recoil: one wide drawing for a beat or two, no spring
@@ -3592,16 +3597,15 @@ const RUN_POSE=[[1.00,0,0],[0.94,0.05,0],[1.02,0,0.05],[1.05,-0.03,0.10],[1.00,0
 const HOP=[0,0.22,0.06,0.18];                                 // an enemy's hop per walk drawing, likewise
 const WIND_F=[0,2,4,6,6,6];                                   // the wind-up's even frames (the odd ones hold the unused spit gob), the last held
 const DIE_AL=[1,0.66,0.33,0], DIE_SQ=[0.85,0.6,0.45,0.45];    // the death: erased in three hard steps, flattening as it goes
-const MULT_ROT_SETS=[[-0.35],[-0.5,0.25],[-0.5,-0.25,0.25]];   /* one, two or three rotated bodies in ONE frame on the sweep and the stinger */
-const MULT_ROT=MULT_ROT_SETS[Math.max(0,inkNum(3,1)-1)];      /* INK_D (15-effects): three stacked copies of the knight were the grey mass around him mid-sweep; the dial picks the set */
+const MULT_BACK=0.38;   /* FIX3: the sweep/stinger "multiples" were two or three copies of the knight rotated IN PLACE on his own body, each one a solid-ink silhouette (15's ghost edge) -- the black mass mid-swing. Now ONE faint line drawing, this far BEHIND the blow */
 const HURT_SHEET={knight:null,archer:'undeadHurt'};           // real hurt drawings (CLS.hurt wins once HOOKS-anim's CLS entries land)
 let turnK=0, strikeSnap=false, multDone=false, smashT=0, slamT=0, holdT=0, heroShiv=0, runFrame=-1, pAtkId=-1, pDash=0, pCast=0, pHurt=0, pFacing=1, rigPulse=0;
 // a new run: the hero's pose state starts clean (startGame should call this; see HOOKS-anim.md)
 function animReset(){ sclY=1;sclV=0;rigPulse=0;outlPulse=0;turnK=0;strikeSnap=false;multDone=false;smashT=0;slamT=0;holdT=0;heroShiv=0;runFrame=-1;pAtkId=-1;pDash=0;pCast=0;pHurt=0;pFacing=P.facing;heroTick=0;dashFrameK=-1;trailT=0; if(spr)spr.posed=false; }
 // an afterimage whose slot we can reach: ghost() (15) does not return it, so the free slot it is about to take is noted first; a returned object (if 15 grows one) wins
-function ghostOf(h,rot,life){ let o=null; for(const g of ghosts){if(g.life<=0){o=g;break;}} const r=ghost(h,false); if(r&&r.obj)o=r; else if(o&&o.life<=0)o=null; if(!o)return null;
+function ghostOf(h,rot,life,ox,oz){ let o=null; for(const g of ghosts){if(g.life<=0){o=g;break;}} const r=ghost(h,false); if(r&&r.obj)o=r; else if(o&&o.life<=0)o=null; if(!o)return null;
   if(rot){ const q=o.obj.material?o.obj:null; if(q)q.material.rotation+=rot; else { if(o.body)o.body.material.rotation+=rot; if(o.edge)o.edge.material.rotation+=rot; } }   // a sprite ghost, or 15's ink-rim Group of two
-  if(life)o.life=o.max=life; return o; }
+  if(life)o.life=o.max=life; if(ox||oz){o.obj.position.x+=ox||0;o.obj.position.z+=oz||0;} return o; }   /* FIX3: ox/oz put the drawing behind the motion instead of on the body */
 // was that hit a crit? impact() flags e.smashT once HOOKS-anim lands; until then the fresh damage number over it says so
 function wasCrit(e){ for(const q of M.nums)if(q.tgt===e&&q.crit&&q.t<0.13)return true; return false; }
 // death flakes: ink bits flung from the silhouette of the death sheet's last frame (sampled every third texel, once per sheet, off the baked canvas; null where there is no 2d canvas)
@@ -3623,13 +3627,13 @@ function renderUpdate(rdt,alpha){
   if(ANIM.step&&turnK>0)turnK--;   // the turn's two drawings advance on the beat, before this frame's flip can start a new turn
   const OV=SET.sketch>0?BOIL.ov:0;   // which of the three ink drawings every actor shows this frame
   // sprite anim
-  const C=CLS[P.cls], ranged=C.ranged, hurtK=C.hurt||HURT_SHEET[P.cls], idleK=(ranged&&C.idle===C.walk&&SHEETS.archerIdle)?'archerIdle':C.idle;   // the archer idles on his own sheet, not a held walk frame
+  const C=CLS[P.cls], ranged=C.ranged, hurtK=C.hurt||HURT_SHEET[P.cls], idleK=C.idle   /* one sheet family per body: idling on archerIdle (the elf) while walking on undeadWalk (the skeleton) flashed two characters at every idle<->walk edge */;   // the archer idles on his own sheet, not a held walk frame
   // state events: each one is a new drawing, now. Detected here against the last frame until 19/20 call forceStep() themselves (HOOKS-anim.md). The dash's end goes first so a stinger's coil wins over the landing
   { const dashNew=P.dashT>0&&pDash<=0, dashEnd=P.dashT<=0&&pDash>0; pDash=P.dashT;
     if(dashNew){sclY=AN.dashSy;sclV=0;forceStep();}                                                          // the zip: one stretched drawing, held for the whole move
     if(dashEnd){sclY=AN.landSy;sclV=-5;holdT=Math.max(P.landHoldT||0,AN.holdT);forceStep();}                     // the landing: a snapped stretch, held a beat (longer if the camera section asks), then rung down
     const hurtNew=P.hurtT>0&&pHurt<=0; pHurt=P.hurtT; if(hurtNew){sclY=AN.hurtSy;sclV=0;forceStep();}          // the flinch
-    if(P.atk>=0&&P.atkId!==pAtkId){ pAtkId=P.atkId; const a=atkDef(P.atk); strikeSnap=false; multDone=false; if(!ranged){sclY=a.sweep?AN.coilSweep:a.kind==='thrust'?AN.coilThrust:AN.coilSlash;sclV=0;} forceStep(); }   // the coil: one held drawing, snapped in (the old k=260 spring never reached its mark inside a 60 ms wind)
+    if(P.atk>=0&&P.atkId!==pAtkId){ pAtkId=P.atkId; const a=atkDef(P.atk); strikeSnap=false; multDone=false; outlPulse=0;   /* FIX3: a charged sweep held the swell at 0.85 through its wind -- every swing starts on the crisp line */ if(!ranged){sclY=a.sweep?AN.coilSweep:a.kind==='thrust'?AN.coilThrust:AN.coilSlash;sclV=0;} forceStep(); }   // the coil: one held drawing, snapped in (the old k=260 spring never reached its mark inside a 60 ms wind)
     else if(P.atk<0)pAtkId=-1;
     const castEnd=ULT.cast<=0&&pCast>0&&!P.dead; pCast=ULT.cast; if(castEnd){slamT=0.12;sclY=1.25;sclV=-6;holdT=AN.holdT;forceStep();}   // the domain opens: the slam drawing, tall, rung down
     if(slamT>0)slamT-=rdt;
@@ -3687,7 +3691,7 @@ function renderUpdate(rdt,alpha){
   // SM-1: the swell was written EVERY frame off a continuously decaying outlPulse while the body it outlines only moves on
   // the pose beat, so the ink line crept in and out around a held drawing -- a continuous value fighting a stepped one.
   // The pulse still decays in real time; the DRAWN swell is sampled on the beat with everything else.
-  if(ANIM.step||!spr.posed||ovr){ rigPulse=outlPulse; const k=1+rigPulse*0.05; for(const q of spr.rig)q.scale.set(spr.sp.scale.x*k,spr.sp.scale.y*k,1); }
+  if(ANIM.step||!spr.posed||ovr){ rigPulse=outlPulse; const k=1+rigPulse*0.03; for(const q of spr.rig)q.scale.set(spr.sp.scale.x*k,spr.sp.scale.y*k,1); }   /* FIX3: 0.05 on a 9-unit rig pushed the baked line ~2px off the body (a second ring against the post pass's own edge) -- ~1px now */
   { let lean=0, hold=false, snapRot=false;
     if(ranged&&!P.dead&&(P.aiming||(P.atk>=0&&P.atkT<SHOOT.wind+SHOOT.active+0.1))){   // drawing or loosing: the whole body turns to the aim, any direction, and holds it through the release
       const tg=M.lock&&M.lock.state!=='dead'?M.lock:null,[dax,daz]=tg?norm(tg.x-P.x,tg.z-P.z):[P.aimx,P.aimz];
@@ -3723,7 +3727,7 @@ function renderUpdate(rdt,alpha){
     if(ANIM.step){const u=1-P.dashT/T.DASH_T,k=u<0.36?0:u<0.72?1:2;if(k!==dashFrameK){dashFrameK=k;frameCard(vx,vz,k,spr.flip);}else ghost(spr,false);mark(vx-P.dashDx*0.6,vz-P.dashDz*0.6,Math.atan2(P.dashDz,P.dashDx),false);} }
   else { dashFrameK=-1;
     if(P.atk>=0&&!ranged){ const a=atkDef(P.atk);
-      if(P.atkT>=a.wind&&!multDone){ multDone=true; if(a.sweep||P.atk===4)for(const r of MULT_ROT)ghostOf(spr,r*P.facing,inkMix(0.07,0.1)); }   /* INK_D: fewer copies, held for less of the swing */
+      if(P.atkT>=a.wind&&!multDone){ multDone=true; if((a.sweep||P.atk===4)&&inkHas(0.3))ghostOf(spr,-0.16*P.facing,inkMix(0.07,0.1),-P.aimx*MULT_BACK,-P.aimz*MULT_BACK); }   /* FIX3: one faint trailing drawing behind the blow, never a stack on the body */
       else if(P.lunged&&ANIM.step&&P.atkT<a.wind+a.active+0.04&&inkHas(0.4))ghost(spr,false); }   /* INK_D: the lunge's own trailing drawing goes first on a spare page */
     else if(planar>T.WALK*0.7&&trailT<=0){trailT=0.06;puff(dust,vx-P.vx*0.03,vz-P.vz*0.03,0.1,-P.vx*0.15+rnd(-0.6,0.6),-P.vz*0.15+rnd(-0.6,0.6),0.6,0.36,0.85);} }
   // enemies
@@ -3884,7 +3888,7 @@ function placeAway(x,z,dist,rx,ry,drift){const [sx,sy]=toScreen(x,0.6,z),[px,py]
   const HR=(typeof HUD_RECTS!=='undefined')?HUD_RECTS:null;
   const cards=[];for(const p of [M.panel,M.pending])if(p&&p.kind!=='death'&&p.phase!=='close'){const hm=panelHome(p);cards.push({cx:hm.cx,cy:hm.cy,w:hm.w+52*S,h:hm.h+52*S,ang:hm.ang});}   // a closing card is gone before the balloon settles; a queued one is about to land. The rect is grown for the card's shadow plate and border
   if(M.star&&M.star.hold&&M.star.t<M.star.life*0.85){const st=M.star,r=(st.kill?108:st.big?84:78)*S;cards.push({cx:st.sx,cy:st.sy,w:2*r*(st.wide||1),h:2*r,ang:0});}   // the balloon on screen is an obstacle for everything placed after it
-  for(const q of M.nums){if(q.t>q.life*0.8)continue;const [qx,qy]=numPos(q);cards.push({cx:qx,cy:qy,w:(q.big?56:40)*S*Math.max(1,q.val.length*0.62),h:(q.big?44:32)*S,ang:0});}   // and so is every number still on screen
+  for(const q of M.nums){if(q.t>q.life*0.8)continue;const [qx,qy]=numPos(q);cards.push({cx:qx,cy:qy,w:(q.big||q.crit?74:54)*S*Math.max(1,q.val.length*0.62),h:(q.big||q.crit?58:42)*S,ang:0});}   // and so is every number still on screen
   rx=rx||0;ry=ry||rx;dist*=S;rx*=S;ry*=S;drift=(drift||0)*S;let best=null,bs=-1e9;   // callers speak in design px
   for(let ring=0;ring<RINGS.length;ring++){const d=ring<RINGS.length-1?dist*RINGS[ring][0]:Math.max(dist*RINGS[ring][0],IH*0.34),sq=RINGS[ring][1];   // the last ring always reaches past a mid-screen band, whatever the screen height
     for(let i=0;i<12;i++){const a=i/12*6.283+Math.random()*0.5/(ring+1),ox=sx+Math.cos(a)*d,oy=sy+Math.sin(a)*d*sq-20*S,cx=clamp(ox,150*S,IW-150*S),cy=clamp(oy,120*S,IH-90*S);   // score where the draw clamp will actually put it; outer rings sample evenly
@@ -4012,7 +4016,7 @@ function drawPows(){
 // itself. The offset is solved ONCE per tick (`_ox/_oy`) so the word does not crawl about while it is on screen.
 const _tBox=[];
 function tickLayout(){ _tBox.length=0;
-  for(const n of M.nums){ if(n.t>=n.life)continue; const [qx,qy]=numPos(n),sz=(n.crit?36:n.big?30:n.ally?20:24)*S;
+  for(const n of M.nums){ if(n.t>=n.life)continue; const [qx,qy]=numPos(n),sz=numSize(n)*S;
     _tBox.push([qx,qy,sz*0.31*Math.max(1,n.val.length)+7*S,sz*0.42]); }
   for(const k of M.ticks){ if(k._ox!=null)continue; k._ox=0;k._oy=0;
     const fs=(k.big?26:20);ictx.font='italic '+fs+'px '+FONT_POW;
@@ -4045,13 +4049,19 @@ const GK=()=>Math.min(3,Math.max(1,Math.round(S*IDPR*4)/4));
 function glyphBmp(ch,size,big,crit,fill,K){
   const key=ch+'|'+size+'|'+(big?1:0)+(crit?1:0)+'|'+fill+'|'+K;
   let g=_glyph.get(key); if(g)return g;
-  const pad=Math.ceil(size*0.55), w=Math.ceil((size*1.2+pad*2)*K), h=Math.ceil((size*1.6+pad*2)*K);
+  const pad=Math.ceil(size*0.6), w=Math.ceil((size*1.2+pad*2)*K), h=Math.ceil((size*1.6+pad*2)*K);
   const c=document.createElement('canvas'); c.width=w; c.height=h; const x=c.getContext('2d');
   x.setTransform(K,0,0,K,w*0.5,h*0.5);
   x.font=size+'px '+FONT_POW; x.textAlign='center'; x.textBaseline='middle'; x.lineJoin='round';
-  x.lineWidth=big?6.4:5.6; x.strokeStyle='#14151c'; for(let k=3;k>0;k--)x.strokeText(ch,k*1.5,k*1.7); x.strokeText(ch,0,0);   // the stacked extrusion
+  /* FIX3 (the user: "need damage numbers"): a normal hit was a paper-cream digit on the cream page. Now, outside-in: a thin INK outer
+     line, a WIDE PAPER halo (the knockout that reads over bodies, decals and ink alike), the ink extrusion on big/crit, an ink plate,
+     then the fill -- ink for a normal hit, gold on ink for a crit, red on ink for damage taken */
+  const halo=size*0.34;
+  x.lineWidth=halo+size*0.09; x.strokeStyle='#14151c'; x.strokeText(ch,0,0);
+  x.lineWidth=halo; x.strokeStyle='#f2ead6'; x.strokeText(ch,0,0);
+  if(big||crit){ x.lineWidth=size*0.15; x.strokeStyle='#14151c'; for(let k=2;k>0;k--)x.strokeText(ch,k*size*0.045,k*size*0.055); }   // the stacked extrusion, heavy hits only
+  x.lineWidth=size*(crit?0.2:0.12); x.strokeStyle='#14151c'; x.strokeText(ch,0,0);   // the ink plate the fill sits on
   x.fillStyle=fill; x.fillText(ch,0,0);
-  x.lineWidth=2; x.strokeStyle='rgba(251,246,234,0.7)'; x.strokeText(ch,0,-1);
   g={c,w:w/K,h:h/K}; _glyph.set(key,g); _glyphQ.push(key);
   if(_glyphQ.length>240){const o=_glyphQ.shift(); _glyph.delete(o);}
   return g; }
@@ -4077,14 +4087,15 @@ function wordBmp(key,K,sizer,paint){
   g={c,w,h,ox:wh[2]||0,oy:wh[3]||0,px:c.width*c.height,u:++_wordU}; _word.set(key,g); _wordPx+=g.px; wordEvict(); return g;}
 const wordBlit=(g,k)=>{const q=k||1;ictx.drawImage(g.c,(-g.w*0.5+g.ox)*q,(-g.h*0.5+g.oy)*q,g.w*q,g.h*q);};
 function wordCacheClear(){_word.clear();_wordPx=0;}
+const numSize=n=>n.crit?48:n.big?40:n.ally?26:32;   /* FIX3: 36/30/20/24 -> 48/40/26/32 (x S); one table for drawNums, tickLayout and the poster keep-out */
 function drawNums(){
   for(const n of M.nums){const t=n.t/n.life,[px,py]=numPos(n);
-    const size=n.crit?36:n.big?30:n.ally?20:24, out=t>0.7?1-easeIn((t-0.7)/0.3):1, mg=n.merge>0?1+0.38*easeOut(n.merge/0.2):1, bk=SET.sketch>0?(n.t<0.25?Math.floor(n.t*12):9)+(n.seed||0):0;   // a merged hit re-pops the whole number; the glyphs boil for three drawings then settle
+    const size=numSize(n), out=t>0.7?1-easeIn((t-0.7)/0.3):1, mg=(n.merge>0?1+0.45*easeOut(n.merge/0.22):1)*(1+0.1*Math.min(4,n.merges||0)), bk=SET.sketch>0?(n.t<0.25?Math.floor(n.t*12):9)+(n.seed||0):0;   // a merged hit re-pops the whole number and it GROWS a tenth per hit folded in (FIX3); the glyphs boil for three drawings then settle
     ictx.save();ictx.translate(px,py);ictx.scale(S,S);ictx.rotate(n.rot*(1-t*0.6));ictx.scale(Math.max(0.001,out)*mg,Math.max(0.001,out)*mg);ictx.globalAlpha=1;
     ictx.font=size+'px '+FONT_POW;ictx.textAlign='center';ictx.textBaseline='middle';ictx.lineJoin='round';
-    const fill=n.en?'#5fb0a4':n.heal?'#6fb06a':n.red?'#c94a37':n.ally?'#e8dcb0':n.crit?'#c9a94a':n.big?'#e8dcb0':'#fbf6ea';
+    const fill=n.en?'#5fb0a4':n.heal?'#6fb06a':n.red?'#c94a37':n.ally?'#e8dcb0':n.crit?'#e0b84a':'#14151c';   /* FIX3: ink digits on the paper halo for a hit landed (was paper-cream on paper); gold on ink for a crit; red for damage taken */
     const chars=n.val.split(''),wTot=chars.length*size*0.62;let x=-wTot/2+size*0.31;
-    for(let i=0;i<chars.length;i++){const st=n.settled?1:Math.max(0,Math.min(1,(t-i*0.025)/0.11)),pop=st<0.55?0.2+st/0.55*1.25:1.45-(st-0.55)/0.45*0.45;   // a quick digit ripple on the first pop only; a merged number re-pops as one
+    for(let i=0;i<chars.length;i++){const st=n.settled?1:Math.max(0,Math.min(1,(t-i*0.02)/0.09)),pop=st<0.4?0.3+st/0.4*1.3:1.6-(st-0.4)/0.6*0.6;   // a quick digit ripple on the first pop only (FIX3: snappier -- 0.3 -> 1.6 -> 1 in 90 ms); a merged number re-pops as one
       const gx=bk?(h1(i*3+1,bk)-0.5)*1.6:0,gy=bk?(h1(i*3+2,bk)-0.5)*1.6:0,gr=bk?(h1(i*3+3,bk)-0.5)*0.06:0;
       const gb=glyphBmp(chars[i],size,!!n.big,!!n.crit,fill,GK());
       ictx.save();ictx.translate(x+gx,gy);ictx.rotate(gr);ictx.scale(pop,pop);ictx.drawImage(gb.c,-gb.w*0.5,-gb.h*0.5,gb.w,gb.h);ictx.restore();x+=size*0.62;}
