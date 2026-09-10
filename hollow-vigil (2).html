@@ -414,6 +414,21 @@ const PAPER=0xf2ead6, SKY=0x9fd4f5, INK=0x14151c;   // the page: everything is d
    SET.sketch=0 never reads any of it except the baked sheet hatch, which it always had (and now has less of). */
 const CLARITY=1;
 const clMix=(dirty,clean)=>dirty+(clean-dirty)*CLARITY;   /* a value between the dirty page (CLARITY 0) and the clean one (1) */
+/* ================= COLOUR -- the page is the ORIGINAL GAME'S COLOUR, drawn over in ink (FIX4, 2026-09-09) =================
+   The user, on the clean cream page: "the entire world is white ... I want proper color". The target is the pre-overhaul
+   picture -- a green field, saturated roofs and trees -- with the pencil-and-ink treatment drawn OVER it: a coloured ink
+   drawing, not drawings on a white sheet. Paper stays for the chrome (HUD, cards) and past the town's edge.
+     FLOOR_TINT    the grass wash the sketch floor is painted with. The original 16px tile averages rgb(83,112,35) and is
+                   drawn tinted 0xdfe3c8, i.e. rgb(73,100,27) on screen; this is that green a shade lighter, and the post
+                   pass's S-curve (28's CURVE_K) lands it at about rgb(75,114,34). The pencil ticks on it are GRASS_INK.
+     COLOUR_SAT    how much of every sprite's, prop's and building's own chroma survives the post pass: 1 = all of it
+                   (28's WASH_SAT is 1-COLOUR_SAT on the clean page), 0 = graphite.
+     SHADOW_HATCH  the one pencil band left on the clean page: a light hatch only in TRUE shadow, i.e. a wash darker than
+                   SHADOW_LO luminance (a red roof is ~0.30, the grass ~0.37, an ink line 0.08), at this alpha. 0 = none.
+   SET.sketch=0 reads none of these: it keeps the pixel tile and the direct render. */
+const FLOOR_TINT=0x527424, COLOUR_SAT=1.0, SHADOW_HATCH=0.22, SHADOW_LO=0.17;
+const GRASS_INK=(()=>{const r=(FLOOR_TINT>>16)&255,g=(FLOOR_TINT>>8)&255,b=FLOOR_TINT&255;return Math.round(r*0.42)+','+Math.round(g*0.42)+','+Math.round(b*0.42);})();   /* the grass ticks: the wash's own green, deep */
+const GRASS_LIGHT=(()=>{const r=(FLOOR_TINT>>16)&255,g=(FLOOR_TINT>>8)&255,b=FLOOR_TINT&255;return Math.min(255,Math.round(r*1.45))+','+Math.min(255,Math.round(g*1.35))+','+Math.min(255,Math.round(b*1.6));})();   /* a few blades catching the light */
 let clearColor=SKY;                                  // what the world clears to right now (refreshSketch swaps it); renderPanel re-asserts it after its own passes
 let prBase=Math.min(window.devicePixelRatio||1,2);   // rebuildLadder() caps this at 1.25 while the sketch pass is on: pencil lines at 1.25x read as a scan, and the pass stays affordable
 renderer.setPixelRatio(prBase);
@@ -491,6 +506,14 @@ let OUTL_ROWS=1;
 // swaps the two through 13's reink()), so the untouched green-grass game never wears the paper's cut-out treatment.
 function outlineStack(img,color,rim){ if(window.HV_MAKE_TEX) return null; const W=img.width,H=img.height,c=document.createElement('canvas');c.width=W;c.height=H*3;const g=c.getContext('2d'),halo=rim===false?null:haloSheet(img);
   for(let v=0;v<3;v++){if(halo)g.drawImage(halo,0,(2-v)*H);g.drawImage(outlineSheet(img,1,color,v),0,(2-v)*H);} OUTL_ROWS=3; return c; }
+/* FIX4 -- THE LINE-ONLY STACK. outlineSheet() is a dilation + source-in fill: a SOLID silhouette, not a line. Under an opaque body only its
+   one-texel margin shows, which is what let it pass for a line; drawn anywhere WITHOUT a body over it (an afterimage, a smear, a faded body
+   behind a roof, a fading corpse) it is a black body -- the user's "whole player model turns black" whenever he moved and swung, because
+   the moving paths spawn those copies on and beside him. ringStack cuts the body's own pixels out of every row of the stack, so what is
+   left IS the line: the boiling 1-texel contour and (rim) the paper gap + ink rim outside it. The rule this enforces: nothing ink-FILLED is
+   ever drawn at the hero's position but his body's own art; every line texture is hollow. The hero and every actor draw this stack on the
+   page (13's outlSrc); the afterimage/smear pools draw the rim-less one (sheetRing). SET.sketch=0 keeps the old filled OFF stack. */
+function ringStack(img,color,rim){ const c=outlineStack(img,color,rim); if(!c)return null; const g=c.getContext('2d'),H=img.height; g.globalCompositeOperation='destination-out'; for(let v=0;v<3;v++)g.drawImage(img,0,v*H); g.globalCompositeOperation='source-over'; return c; }
 // nature art gets its ink baked in: outline under, image over, a pencil turn of the form on the lower right, then a light value hatch. Zero extra sprites, and the old drop-shadow copy is gone.
 // CRISP (0b): props get the actors' treatment -- ink rim, paper gap, ink line, then the art at its own colours. The form-turn gradient and the hatch are off on the clean page (they were dark paper mixed into every fill).
 // CLARITY r4: `rim` false is the OFF bake (outline under, image over -- the M1 look, no gap/rim); 28's refreshSketch swaps natTex/natTexPlain on every prop.
@@ -502,20 +525,26 @@ function natBake(img,rim){ if(window.HV_MAKE_TEX) return img; const W=img.width,
 // CLARITY: this was the single biggest cause of the dirty page -- 2000 ticks of rgba(38,40,52,.3) per 1024px tile, tiled ten
 // times across the ground, mip-blurred at the camera's distance into an even grey grime. Clean, the sheet is mostly bare cream:
 // a fifth of the ticks, half the alpha, a lighter graphite, the tufts and pebbles cut to match. The floor colour is the page's own.
-const FLOOR_INK=()=>Math.round(clMix(38,84))+','+Math.round(clMix(40,86))+','+Math.round(clMix(52,98));   /* the floor's graphite: near-ink dirty, a light pencil grey clean */
+const FLOOR_INK=()=>Math.round(clMix(38,84))+','+Math.round(clMix(40,86))+','+Math.round(clMix(52,98));   /* the edge plane's graphite: near-ink dirty, a light pencil grey clean */
+/* FIX4: the sketch floor is a GRASS WASH (FLOOR_TINT above), not the paper -- the original game's green field with a few pencil marks
+   in the grass's own deeper green on it and a few lighter blades, sparse (the CRISP counts), so it reads as a coloured drawing of a
+   field and never as grime. The dirty end of CLARITY still mixes toward its old paper floor. */
+const FLOOR_RGB=()=>{const r=(FLOOR_TINT>>16)&255,g=(FLOOR_TINT>>8)&255,b=FLOOR_TINT&255;return 'rgb('+Math.round(clMix(240,r))+','+Math.round(clMix(231,g))+','+Math.round(clMix(209,b))+')';};
 function paperFloorTex(){const N=1024,c=document.createElement('canvas');c.width=c.height=N;const g=c.getContext('2d');
-  g.fillStyle='rgb('+Math.round(clMix(240,242))+','+Math.round(clMix(231,234))+','+Math.round(clMix(209,214))+')';g.fillRect(0,0,N,N);   /* #f0e7d1 -> the PAPER itself */
+  g.fillStyle=FLOOR_RGB();g.fillRect(0,0,N,N);   /* the field's green (paper at CLARITY 0) */
   let s=11;const r=()=>{s=(s*1103515245+12345)&0x7fffffff;return s/0x7fffffff;};
-  g.strokeStyle='rgba('+FLOOR_INK()+','+clMix(0.3,0.12).toFixed(3)+')';g.lineCap='round';   /* CRISP (0b): 380 -> 90 ticks, 34 -> 10 tufts, 24 -> 6 pebbles per tile at a lighter alpha: a handful of pencil marks on a bright page, not a carpet */
+  g.strokeStyle='rgba('+GRASS_INK+','+clMix(0.3,0.42).toFixed(3)+')';g.lineCap='round';   /* CRISP (0b): 380 -> 90 ticks, 34 -> 10 tufts, 24 -> 6 pebbles per tile: a handful of pencil marks, not a carpet. FIX4: in the grass's deep green */
   for(let i=0,n=Math.round(clMix(2000,90));i<n;i++){const x=r()*N,y=r()*N,a=-0.9+(r()-0.5)*0.5,l=6+r()*14;g.lineWidth=0.8+r()*0.9;g.beginPath();g.moveTo(x,y);g.lineTo(x+Math.cos(a)*l,y+Math.sin(a)*l);g.stroke();}   // grass ticks, all leaning one way
-  g.strokeStyle='rgba('+FLOOR_INK()+','+clMix(0.42,0.18).toFixed(3)+')';
+  g.strokeStyle='rgba('+GRASS_LIGHT+','+clMix(0.0,0.5).toFixed(3)+')';
+  for(let i=0,n=Math.round(clMix(0,70));i<n;i++){const x=r()*N,y=r()*N,a=-0.9+(r()-0.5)*0.5,l=5+r()*10;g.lineWidth=0.8+r()*0.7;g.beginPath();g.moveTo(x,y);g.lineTo(x+Math.cos(a)*l,y+Math.sin(a)*l);g.stroke();}   // a few blades catching the light (FIX4)
+  g.strokeStyle='rgba('+GRASS_INK+','+clMix(0.42,0.5).toFixed(3)+')';
   for(let i=0,n=Math.round(clMix(140,10));i<n;i++){const x=r()*N,y=r()*N;g.lineWidth=1.1;g.beginPath();for(let k=0;k<3;k++){g.moveTo(x+k*5,y);g.lineTo(x+k*5+3,y-4);g.lineTo(x+k*5+6,y);}g.stroke();}                        // tufts
   for(let i=0,n=Math.round(clMix(90,6));i<n;i++){const x=r()*N,y=r()*N,w=3+r()*6;g.lineWidth=1;g.beginPath();g.ellipse(x,y,w,w*0.6,r()*3,0,6.283);g.stroke();}                                                             // pebbles
   const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.minFilter=THREE.LinearMipmapLinearFilter;t.magFilter=THREE.LinearFilter;t.anisotropy=renderer.capabilities.getMaxAnisotropy();t.repeat.set(10,10);return t;}
 // a second, sparse and transparent layer at a different repeat breaks the tile's period: the eye never finds the seam
 function paperFloorDetailTex(){const N=512,c=document.createElement('canvas');c.width=c.height=N;const g=c.getContext('2d');
   let s=23;const r=()=>{s=(s*1103515245+12345)&0x7fffffff;return s/0x7fffffff;};
-  g.strokeStyle='rgba('+FLOOR_INK()+','+clMix(0.34,0.13).toFixed(3)+')';g.lineCap='round';   /* CLARITY: the period-breaking layer keeps its job at a fifth of the marks. CRISP: and a third of that again */
+  g.strokeStyle='rgba('+GRASS_INK+','+clMix(0.34,0.4).toFixed(3)+')';g.lineCap='round';   /* CLARITY: the period-breaking layer keeps its job at a fifth of the marks. CRISP: and a third of that again. FIX4: in the grass's green */
   for(let i=0,n=Math.round(clMix(60,4));i<n;i++){const x=r()*N,y=r()*N;g.lineWidth=1.1;g.beginPath();for(let k=0;k<3;k++){g.moveTo(x+k*5,y);g.lineTo(x+k*5+3,y-4);g.lineTo(x+k*5+6,y);}g.stroke();}
   for(let i=0,n=Math.round(clMix(40,2));i<n;i++){const x=r()*N,y=r()*N,w=3+r()*5;g.lineWidth=1;g.beginPath();g.ellipse(x,y,w,w*0.6,r()*3,0,6.283);g.stroke();}
   for(let i=0,n=Math.round(clMix(220,14));i<n;i++){const x=r()*N,y=r()*N,a=-0.9+(r()-0.5)*0.5,l=8+r()*16;g.lineWidth=0.8+r()*0.8;g.beginPath();g.moveTo(x,y);g.lineTo(x+Math.cos(a)*l,y+Math.sin(a)*l);g.stroke();}
@@ -580,7 +609,7 @@ const sqTex=(()=>{const c=document.createElement('canvas');c.width=c.height=8;co
 // Legacy approach: THREE.Sprite billboards (always face the camera, base sits on the
 // ground point at any pitch). Each entity owns texture clones per animation; the frame
 // window is the texture's repeat/offset. center = (body x, feet y) so position = feet.
-const sheetTex={}, sheetOutl={}, sheetOutlPlain={}, sheetHalo={}; const SPRITES=[];   /* sheetOutlPlain: the line-only stacks SKETCH OFF draws (CLARITY r4) */
+const sheetTex={}, sheetOutl={}, sheetOutlPlain={}, sheetRing={}, sheetHalo={}; const SPRITES=[];   /* sheetOutlPlain: the filled stacks SKETCH OFF draws (CLARITY r4); sheetRing: the HOLLOW bare contour the afterimage/smear pools draw on the page (FIX4, 12's ringStack) */
 const outlSrc=()=>SET.sketch>0?sheetOutl:sheetOutlPlain;   /* which outline stack a rig clones right now: gap+rim on paper, the bare line OFF */   // every actor sprite made by makeSprite: refreshSketch() walks it
 function sheet(key){return sheetTex[key];}
 const layer=(o,z)=>{o.renderOrder=1000+Math.round(z*8);};
@@ -851,7 +880,7 @@ function brushTex(seed){const c=document.createElement('canvas');c.width=128;c.h
   g.globalCompositeOperation='destination-out';for(let i=0;i<3;i++)g.fillRect(30+i*26+seed*3,10+(i%2)*9,3,5);return makeTex(c);}
 const brush=[1,2].map(brushTex);
 // ---- pools ----
-const marks=pool(12,()=>{const s=new THREE.Sprite(new THREE.SpriteMaterial({map:brush[0],transparent:true,alphaTest:0.2,depthWrite:false,color:0xffffff}));s.renderOrder=9003;scene.add(s);return{obj:s,max:1,len:1};});
+const marks=pool(12,()=>{const s=new THREE.Sprite(new THREE.SpriteMaterial({map:brush[0],transparent:true,alphaTest:0.2,depthWrite:false,color:0xffffff}));s.renderOrder=4900;scene.add(s);return{obj:s,max:1,len:1};});   /* FIX4: 9003 -> 4900, UNDER the actor layer (5000+): a 2.4-tile ink brush stroke centred 0.6 behind the dashing knight reached into his legs and printed over him */
 function mark(x,z,ang,big){const o=take(marks);o.life=o.max=big?0.16:0.12;o.len=big?3.4:2.4;o.obj.position.set(x,0.55,z);o.obj.material.rotation=-ang+rnd(-0.35,0.35);o.obj.material.map=brush[Math.random()<0.5?0:1];o.obj.visible=true;o.obj.material.opacity=1;}
 function stepMarks(dt){dt=fxDt(dt);for(const o of marks){if(o.life<=0)continue;o.life-=dt;if(o.life<=0){o.obj.visible=false;continue;}const t=q2(1-o.life/o.max),st=Math.min(2,Math.floor(t*3));o.obj.scale.set(o.len*[0.55,0.95,1.3][st],0.34*[1,0.85,0.55][st],1);o.obj.material.opacity=[1,1,0.5][st];}}   // three held drawings: the stroke lands, stretches, dries
 const dust=pool(64,()=>{const s=new THREE.Sprite(new THREE.SpriteMaterial({map:clouds[0],transparent:true,alphaTest:0.3,depthWrite:false,color:0xffffff}));s.renderOrder=9000;scene.add(s);return{obj:s,vx:0,vz:0,vy:0,max:1,size:1,v0:0};});
@@ -918,7 +947,8 @@ function stepArcs(dt){dt=fxDt(dt);for(const o of arcs){if(o.life<=0)continue;o.l
 // Now a ghost is a faint LINE DRAWING: body = the bare boiling line (sheetOutlPlain, no gap/rim) at <=0.45, edge = the same halo
 // tinted PAPER at <=0.25 (a pale cut-out under the line, never ink), and the callers put it BEHIND the motion. Framed ghosts keep the colour body
 const mkGhost=()=>{const grp=new THREE.Group();const mk=(c,ro)=>{const s=new THREE.Sprite(new THREE.SpriteMaterial({transparent:true,alphaTest:0.05,depthWrite:false,color:c,opacity:0}));s.renderOrder=ro;grp.add(s);return s;};const body=mk(0xffffff,2),edge=mk(0xf2ead6,1.5);scene.add(grp);return{obj:grp,body,edge,tex:{},etex:{},max:1,framed:false,hard:false,hero:false};};
-const ghostLine=k=>(typeof sheetOutlPlain!=='undefined'&&sheetOutlPlain[k])||sheetOutl[k];   /* FIX3: the line-only stack (three boiling rows, same UV math); the gap+rim stack only if the plain one was never baked */
+const ghostLine=k=>(SET.sketch>0&&typeof sheetRing!=='undefined'&&sheetRing[k])||(typeof sheetOutlPlain!=='undefined'&&sheetOutlPlain[k])||sheetOutl[k];   /* FIX4: on the page the HOLLOW contour (12's ringStack -- the body's own pixels cut out, so a stack of afterimages is a stack of LINES, never a black body); OFF keeps its old filled silhouette, the original's dark afterimage */
+const ghostKey=k=>SET.sketch>0?k+'|r':k;   /* the clone cache is per source stack */
 const ghosts=pool(24,mkGhost), fGhosts=pool(6,mkGhost), smears=pool(6,mkGhost);   // framed afterimages never get recycled by the trail; smears are the two-frame stretched drawings of a heavy hit
 // dash motion frames: each one a different crop of the afterimage, geometry billboards, fanned stack
 // crops are fractions of the 100px sheet frame (x0,x1 from the left; y0,y1 from the top); the anchor is (0.535 from left, 0.56 from top)
@@ -950,7 +980,7 @@ function shapeMesh(pts,color,scale,order,map,flipX){const sh=new THREE.Shape(pts
 // speed tails on the knight himself while dashing: tapered ink streaks with a white core, in the motion frame
 const heroTails=new THREE.Group(); heroTails.visible=false; scene.add(heroTails);
 const heroTailParts=[];
-for(const [yy,len,th] of [[-0.38,1.5,0.17],[0.06,2.0,0.22],[0.48,1.25,0.15]]){const tl=shapeMesh([[-0.55,yy-th],[-0.55-len,yy],[-0.55,yy+th]],0x14151c,1.0,4999);const wl=shapeMesh([[-0.53,yy-th*0.4],[-0.55-len*0.72,yy],[-0.53,yy+th*0.4]],0xffffff,1.0,4999.5);heroTails.add(tl,wl);heroTailParts.push(tl,wl);}
+for(const [yy,len,th] of [[-0.38,1.5,0.17],[0.06,2.0,0.22],[0.48,1.25,0.15]]){const tl=shapeMesh([[-1.3,yy-th],[-1.3-len,yy],[-1.3,yy+th]],0x14151c,1.0,4999);const wl=shapeMesh([[-1.28,yy-th*0.4],[-1.3-len*0.72,yy],[-1.28,yy+th*0.4]],0xffffff,1.0,4999.5);heroTails.add(tl,wl);heroTailParts.push(tl,wl);}   /* FIX4: the streaks start 1.3 back -- outside the body's half-width (25 px of the 100 px frame = 1.13 tiles) -- so nothing ink-filled is ever drawn on his position */
 function stepHeroTails(rdt,vx,vz){
   const on=P.dashT>0, after=P.sinceDashEnd<0.14;
   if(!on&&!after){heroTails.visible=false;return;}
@@ -1046,27 +1076,27 @@ function ghost(h,framed,fk,px,pz){const o=take(framed?fGhosts:ghosts);o.life=o.m
     if(h.flip){tx.repeat.set(-(x1-x0)/sd.n,y1-y0);tx.offset.set((idx+x1)/sd.n,1-y1);} else {tx.repeat.set((x1-x0)/sd.n,y1-y0);tx.offset.set((idx+x0)/sd.n,1-y1);}
     b.material.map=tx;warm(b);b.material.color.set(0xffffff);b.center.set(0.5,0.5);b.material.depthTest=false;b.scale.set((x1-x0)*h.w,(y1-y0)*h.h,1);b.position.set(0,0,0);b.material.rotation=f.rot;b.renderOrder=spr.sp.renderOrder-40+fk*8+5;
     o.obj.position.copy(frameAnchor(px==null?h.grp.position.x:px,pz==null?h.grp.position.z:pz,f,h.flip));ed.visible=false;}
-  else {if(!o.tex[k])o.tex[k]=cloneTex(ghostLine(k));if(!o.etex[k])o.etex[k]=cloneTex(sheetHalo[k]);const tx=o.tex[k],et=o.etex[k],src=h.tex[k],on=SET.sketch>0;
-    tx.repeat.set(src.repeat.x,1/OUTL_ROWS);tx.offset.set(src.offset.x,OUTL_ROWS>1?(on?BOIL.ov:0)/OUTL_ROWS:0);et.repeat.copy(src.repeat);et.offset.copy(src.offset);   // the line reads the boiling row; the paper cut-out the halo
-    b.material.map=tx;ed.material.map=et;warm(b);warm(ed);b.material.color.set(0xffffff);ed.material.color.set(0xf2ead6);b.material.depthTest=ed.material.depthTest=true;   /* FIX3: the line is ink already (tint cannot lighten it; opacity does, in stepGhosts); the edge is PAPER, never ink */
-    for(const q of [b,ed]){q.center.copy(h.sp.center);q.scale.copy(h.sp.scale);q.position.copy(h.sp.position);q.material.rotation=h.sp.material.rotation;}
-    o.obj.position.copy(h.grp.position);if(px!=null){o.obj.position.x=px;o.obj.position.z=pz;}b.renderOrder=h.sp.renderOrder-1.3;ed.renderOrder=h.sp.renderOrder-1.4;ed.visible=on;}
+  else {const gk=ghostKey(k);if(!o.tex[gk])o.tex[gk]=cloneTex(ghostLine(k));const tx=o.tex[gk],src=h.tex[k],on=SET.sketch>0;
+    tx.repeat.set(src.repeat.x,1/OUTL_ROWS);tx.offset.set(src.offset.x,OUTL_ROWS>1?(on?BOIL.ov:0)/OUTL_ROWS:0);   // the line reads the boiling row
+    b.material.map=tx;warm(b);b.material.color.set(0xffffff);b.material.depthTest=true;   /* FIX4: ONE sprite, the hollow contour. The "edge" (sheetHalo tinted paper) is gone from the free ghost: haloSheet is an ink RING round a paper fill and a tint multiplies, so it stayed an ink ring at 0.2 on every afterimage (the fix3 probe tested the tint, not the texture) */
+    b.center.copy(h.sp.center);b.scale.copy(h.sp.scale);b.position.copy(h.sp.position);b.material.rotation=h.sp.material.rotation;
+    o.obj.position.copy(h.grp.position);if(px!=null){o.obj.position.x=px;o.obj.position.z=pz;}b.renderOrder=h.sp.renderOrder-1.7;ed.visible=false;}   /* FIX4: UNDER the actor's halo (-1.5): his paper gap + ink rim cut him out of his own trail, so a ghost on his position shows nothing */
   return o;}
 // smear frames: for two drawings (1/12 s) the hit body is one silhouette stretched along the blow, over the body, with two ink multiples trailing behind it: the classic smear of a heavy hit.
 // mult=0 gives just the stretched drawing (the stinger); the stun uses the multiples only (opposite the hit)
-function smear(h,nx,nz,mode){const k=h.anim;if(!h.tex[k]||!sheetHalo[k])return;const [,,sa]=screenAngle(h.grp.position.x,h.grp.position.z,nx,nz);
+function smear(h,nx,nz,mode){const k=h.anim;if(!h.tex[k])return;const [,,sa]=screenAngle(h.grp.position.x,h.grp.position.z,nx,nz);
   camUp.set(0,1,0).applyQuaternion(camera.quaternion);camRight.set(1,0,0).applyQuaternion(camera.quaternion);
   const mid=h.sp.scale.y*(0.5-h.sp.center.y),midx=h.sp.scale.x*(0.5-h.sp.center.x);
   for(let i=(mode==='mult'?1:0);i<(mode==='one'?1:3);i++){const o=take(smears);o.life=o.max=VFX.SMEAR_T;o.framed=false;o.hard=true;o.hero=false;o.obj.visible=true;
-    if(!o.tex[k])o.tex[k]=cloneTex(ghostLine(k));if(!o.etex[k])o.etex[k]=cloneTex(sheetHalo[k]);const tx=o.tex[k],et=o.etex[k],src=h.tex[k];
-    tx.repeat.set(src.repeat.x,1/OUTL_ROWS);tx.offset.set(src.offset.x,OUTL_ROWS>1?BOIL.ov/OUTL_ROWS:0);et.repeat.copy(src.repeat);et.offset.copy(src.offset);
-    const b=o.body,ed=o.edge;b.material.map=tx;ed.material.map=et;warm(b);warm(ed);b.material.color.set(0xffffff);ed.material.color.set(0xf2ead6);b.material.depthTest=ed.material.depthTest=true;   /* FIX3: line + paper cut-out, same as ghost() */
-    for(const q of [b,ed]){q.center.set(0.5,0.5);q.material.rotation=i?h.sp.material.rotation:-sa;q.scale.set(h.sp.scale.x*(i?1:1.9),h.sp.scale.y*(i?1:0.62),1);q.position.copy(h.sp.position).addScaledVector(camUp,mid).addScaledVector(camRight,midx);}
-    o.obj.position.copy(h.grp.position);o.obj.position.x-=nx*(0.32+0.28*i);o.obj.position.z-=nz*(0.32+0.28*i);   /* FIX3: EVERY copy trails behind the blow -- the stretched one used to sit ON the body */
-    b.visible=true;ed.visible=true;o.a0=(i?0.22:0.4)*inkMix(0.72,1);   /* FIX3 + INK_D: faint line drawings (was 0.95/0.35 with a solid-ink edge); the dial thins them further */b.renderOrder=h.sp.renderOrder-1.3-0.2*i;ed.renderOrder=h.sp.renderOrder-1.4-0.2*i;}}   /* FIX3: all UNDER the body (the stretched copy drew over it at +0.4) */
+    const gk=ghostKey(k);if(!o.tex[gk])o.tex[gk]=cloneTex(ghostLine(k));const tx=o.tex[gk],src=h.tex[k];
+    tx.repeat.set(src.repeat.x,1/OUTL_ROWS);tx.offset.set(src.offset.x,OUTL_ROWS>1?BOIL.ov/OUTL_ROWS:0);
+    const b=o.body,ed=o.edge;b.material.map=tx;warm(b);b.material.color.set(0xffffff);b.material.depthTest=true;   /* FIX4: the hollow contour alone, no halo edge (see ghost()) */
+    b.center.set(0.5,0.5);b.material.rotation=i?h.sp.material.rotation:-sa;b.scale.set(h.sp.scale.x*(i?1:1.9),h.sp.scale.y*(i?1:0.62),1);b.position.copy(h.sp.position).addScaledVector(camUp,mid).addScaledVector(camRight,midx);
+    o.obj.position.copy(h.grp.position);o.obj.position.x-=nx*(0.45+0.3*i);o.obj.position.z-=nz*(0.45+0.3*i);   /* FIX3/FIX4: EVERY copy trails behind the blow; the stretched one starts 0.45 back so its leading end clears the body */
+    b.visible=true;ed.visible=false;o.a0=(i?0.3:0.5)*inkMix(0.72,1);   /* FIX4: a hollow line carries more alpha than a filled silhouette could and still never masses */b.renderOrder=h.sp.renderOrder-1.7-0.2*i;}}   /* under the body AND its halo */
 function stepGhosts(dt){dt=fxDt(dt);const k=(SET.sketch>0?1:0.6)*inkMix(0.5,1);   /* INK_D (see the dial above): the free afterimage trail is the grey cloud around a swinging knight -- the dial thins every step of its fade. Hard ghosts (o.hard: the dash smear, the perfect-dodge fan) keep their own a0 */for(const p of ghostPools)for(const o of p){if(o.life<=0)continue;o.life-=dt;if(o.life<=0){o.obj.visible=false;continue;}const t=1-o.life/o.max;let a;
-    if(o.framed)a=t>0.88?1-easeIn((t-0.88)/0.12):1; else if(o.hard)a=Math.min(0.45,o.a0||1); else if(o.hero)a=[0.42,0.2][Math.min(1,Math.floor(t*2))]*k; else a=[0.5,0.32,0.16][Math.min(2,Math.floor(t*3))]*k;   // afterimages fade in hard steps, never a tween. FIX3: the line never above 0.45 (hero 0.34/0.16 at INK_D 0.62)
-    o.body.material.opacity=a;o.edge.material.opacity=o.framed?a:Math.min(0.25,a*0.6);}}   /* FIX3: the paper cut-out under the line stays a whisper */
+    if(o.framed)a=t>0.88?1-easeIn((t-0.88)/0.12):1; else if(o.hard)a=Math.min(0.55,o.a0||1); else if(o.hero)a=[0.55,0.28][Math.min(1,Math.floor(t*2))]*k; else a=[0.6,0.38,0.2][Math.min(2,Math.floor(t*3))]*k;   // afterimages fade in hard steps, never a tween. FIX4: HOLLOW lines now (12's ringStack), so they carry more alpha than the old filled silhouettes and still never mass
+    o.body.material.opacity=a;o.edge.material.opacity=o.framed?a:0;}}   /* FIX4: a free ghost has no edge sprite */
 function behindDecor(x,z){const ps=(typeof camPitchK==='number'&&camPitchK!==0)
     ? Math.sin(camPitchK>0
         ? Math.atan2(lerp(T.CAM_OFF.y,CAMF.PITCH_Y,camPitchK),lerp(T.CAM_OFF.z,CAMF.PITCH_Z,camPitchK))
@@ -1091,7 +1121,7 @@ const deathKind=e=>e.cfg.boss?'collapse':e.cfg.drawH<1.2?'pop':(e.cfg.poise&&e.c
 function occlusionTint(o,x,z,rdt){o.behind=expd(o.behind,behindDecor(x,z)?1:0,14,rdt);const t=o.behind,tn=o.tint||[1,1,1],on=SET.sketch>0,e=o._ent,fr=Math.floor(performance.now()/83);
   o.sp.material.color.setRGB((1-0.42*t)*tn[0],(1-0.3*t)*tn[1],(1-0.02*t)*tn[2]);
   let body=1-0.18*t,line=1-0.3*t,under=1,sil=0,sh=1;
-  if(on&&t>0.5){body=0.35;sil=0.85;line=(fr&1)?1:0.6;}
+  if(on&&t>0.5){body=0.72;sil=0.9;line=1;}   /* FIX4: behind a roof the knight stays a COLOURED figure on a paper cut-out with a steady line (was body 0.35 over an ink-filled outline with a flickering line: a grey lump). The hollow outline (12's ringStack) is what makes a faded body safe */
   if(on&&e&&o._ink>0){const st=Math.min(2,Math.floor((1-o._ink/o._inkMax)*3));if(st<2){body=0;sil=0.95;sh=0;if(st<1)under=0;}else if(!o._inked){o._inked=true;for(let k=0;k<4;k++){const b=rnd(0,6.28);puff(dust,x,z,0.15,Math.cos(b)*1.6,Math.sin(b)*1.6,0.4,0.3,0.45);}}}
   if(on&&e&&e.state==='dead'){const kind=deathKind(e),st=Math.max(0,Math.floor((e.t-0.35)*8));const op=kind==='pop'?(e.t<0.5?1:0):kind==='crack'?1:kind==='collapse'?[1,1,0.8,0.66,0.5,0.33,0.2,0][Math.min(7,Math.floor(e.t*7))]:[1,0.66,0.33,0][Math.min(3,st)];body*=op;line*=op;under*=op;sh*=op;sil=0;}
   o.sp.material.opacity=body;
@@ -1104,13 +1134,14 @@ const wind={x:0.6,z:0,t:0,gust:0,next:9};
 // damage numbers live on the ink layer now (see drawNums)
 // where a number is on screen right now (its arc: up fast, drift sideways, bounce once)
 function numPos(n){const t=n.t/n.life;const rise=n.oy-easeOut(Math.min(1,t*1.6))*n.fy, drift=n.ox+easeOut(t)*n.fx;return [n.sx+drift,n.sy-rise];}   // up, and it stays up
+const NUM_LIFE=0.9, NUM_MERGE_T=0.2, NUM_CAP=8;   /* FIX4 (the user: "damage is still hard to see"): a number lives 0.9 s (was 0.55), only hits landing within 0.2 s of the last fold into it (was 0.55 s -- a whole combo became one number), and up to eight are on screen (was 4-5) */
 function dmgNum(x,z,n,heavy,red,tgt,ally,crit,heal,en){const R=Math.random; n=Math.round(n); if(n<=0)return;   // the sim keeps its fractions (armor bleeds them in); the page shows a number, never 11.941666666666666
 
   // rapid hits on the same target add up in one number that re-pops where it is, instead of stacking five numbers on top of each other
-  if(tgt){const ex=M.nums.find(q=>q.tgt===tgt&&q.t<0.55);if(ex){const [cx,cy]=numPos(ex);ex.val=String((parseInt(ex.val)||0)+n)+(crit||ex.crit?'!':'');ex.crit=ex.crit||!!crit;ex.merges=(ex.merges||0)+1;ex.big=ex.big||heavy||ex.merges>=2;ex.sx=cx;ex.sy=cy;ex.ox=0;ex.oy=0;ex.fx*=0.45;ex.fy=Math.min(ex.fy,-24*S);ex.t=0.12;ex.life=0.8;ex.merge=0.22;ex.settled=true;return;}}   /* FIX3: a merged number re-pops harder and GROWS with each hit folded in (drawNums reads merges); by the third hit it is drawn big */
+  if(tgt){const ex=M.nums.find(q=>q.tgt===tgt&&q.t<NUM_MERGE_T);if(ex){const [cx,cy]=numPos(ex);ex.val=String((parseInt(ex.val)||0)+n)+(crit||ex.crit?'!':'');ex.crit=ex.crit||!!crit;ex.merges=(ex.merges||0)+1;ex.big=ex.big||heavy||ex.merges>=2;ex.sx=cx;ex.sy=cy;ex.ox=0;ex.oy=0;ex.fx*=0.45;ex.fy=Math.min(ex.fy,-30*S);ex.t=0.1;ex.life=NUM_LIFE;ex.merge=0.22;ex.settled=true;return;}}   /* FIX3: a merged number re-pops harder and GROWS with each hit folded in (drawNums reads merges); by the third hit it is drawn big */
   const top=tgt&&tgt.cfg?tgt.cfg.drawH*1.25+(tgt.hy||0):(tgt===P?2.4:1.3),[bx,by]=toScreen(x,top,z);   // straight over the head
-  for(const q of M.nums){ if(tgt&&q.tgt===tgt){q.oy+=22*S;continue;} const [qx,qy]=numPos(q); if(Math.abs(qx-bx)<38*S&&Math.abs(qy-by)<26*S)q.oy+=22*S; }   /* an older number is bumped up out of the way -- on the same body OR merely on the same spot on the page. A sweep through three bodies used to print '46!' and '2!' exactly on top of each other, which is the one number the player is trying to read */
-  M.nums.push({x,z,tgt,ally:!!ally,heal:!!heal,en:!!en,val:(heal||en?'+':'')+String(n)+(crit?'!':''),crit:!!crit,t:0,life:heavy?0.7:0.55,big:heavy,red:!!red,dx:0,sx:bx,sy:by,ox:(R()-0.5)*10*S,oy:0,fx:(R()-0.5)*6*S,fy:-26*S,rot:0,merge:0,merges:0,seed:Math.floor(R()*1e4)});if(M.nums.length>(engagedCount()>=3?4:5))M.nums.shift();}   // launches in a random direction, mostly upward
+  for(const q of M.nums){ if(tgt&&q.tgt===tgt){q.oy+=34*S;continue;} const [qx,qy]=numPos(q); if(Math.abs(qx-bx)<48*S&&Math.abs(qy-by)<34*S)q.oy+=34*S; }   /* FIX4: the bump grew with the digits */   /* an older number is bumped up out of the way -- on the same body OR merely on the same spot on the page. A sweep through three bodies used to print '46!' and '2!' exactly on top of each other, which is the one number the player is trying to read */
+  M.nums.push({x,z,tgt,ally:!!ally,heal:!!heal,en:!!en,val:(heal||en?'+':'')+String(n)+(crit?'!':''),crit:!!crit,t:0,life:heavy?NUM_LIFE+0.1:NUM_LIFE,big:heavy,red:!!red,dx:0,sx:bx,sy:by,ox:(R()-0.5)*10*S,oy:0,fx:(R()-0.5)*6*S,fy:-34*S,rot:0,merge:0,merges:0,seed:Math.floor(R()*1e4)});while(M.nums.length>NUM_CAP)M.nums.shift();}   // launches in a random direction, mostly upward
 // renderUpdate calls stepDmg(rdt) right after the particle pools and before the actor loop. The name is legacy (damage numbers moved to the ink layer); the slot is where every non-particle effect steps now (stepVfx, 15b-decals.js)
 function stepDmg(rdt){stepVfx(rdt);}
 // ---- a new run wipes the world's effects. Every pool here is a fixed ring of live objects: park them, never truncate.
@@ -3597,11 +3628,14 @@ const RUN_POSE=[[1.00,0,0],[0.94,0.05,0],[1.02,0,0.05],[1.05,-0.03,0.10],[1.00,0
 const HOP=[0,0.22,0.06,0.18];                                 // an enemy's hop per walk drawing, likewise
 const WIND_F=[0,2,4,6,6,6];                                   // the wind-up's even frames (the odd ones hold the unused spit gob), the last held
 const DIE_AL=[1,0.66,0.33,0], DIE_SQ=[0.85,0.6,0.45,0.45];    // the death: erased in three hard steps, flattening as it goes
+const GHOST_GAP=0.55;   /* FIX4: a trail afterimage (the lunge's, the dash's) is only laid once the knight has MOVED this far from the last one -- never on his own position, never stacked while he swings on the spot */
+let ghX=1e9, ghZ=1e9;
+function trailGhost(x,z){ if(Math.hypot(x-ghX,z-ghZ)<GHOST_GAP)return null; ghX=x; ghZ=z; return ghost(spr,false); }
 const MULT_BACK=0.38;   /* FIX3: the sweep/stinger "multiples" were two or three copies of the knight rotated IN PLACE on his own body, each one a solid-ink silhouette (15's ghost edge) -- the black mass mid-swing. Now ONE faint line drawing, this far BEHIND the blow */
 const HURT_SHEET={knight:null,archer:'undeadHurt'};           // real hurt drawings (CLS.hurt wins once HOOKS-anim's CLS entries land)
 let turnK=0, strikeSnap=false, multDone=false, smashT=0, slamT=0, holdT=0, heroShiv=0, runFrame=-1, pAtkId=-1, pDash=0, pCast=0, pHurt=0, pFacing=1, rigPulse=0;
 // a new run: the hero's pose state starts clean (startGame should call this; see HOOKS-anim.md)
-function animReset(){ sclY=1;sclV=0;rigPulse=0;outlPulse=0;turnK=0;strikeSnap=false;multDone=false;smashT=0;slamT=0;holdT=0;heroShiv=0;runFrame=-1;pAtkId=-1;pDash=0;pCast=0;pHurt=0;pFacing=P.facing;heroTick=0;dashFrameK=-1;trailT=0; if(spr)spr.posed=false; }
+function animReset(){ ghX=ghZ=1e9;sclY=1;sclV=0;rigPulse=0;outlPulse=0;turnK=0;strikeSnap=false;multDone=false;smashT=0;slamT=0;holdT=0;heroShiv=0;runFrame=-1;pAtkId=-1;pDash=0;pCast=0;pHurt=0;pFacing=P.facing;heroTick=0;dashFrameK=-1;trailT=0; if(spr)spr.posed=false; }
 // an afterimage whose slot we can reach: ghost() (15) does not return it, so the free slot it is about to take is noted first; a returned object (if 15 grows one) wins
 function ghostOf(h,rot,life,ox,oz){ let o=null; for(const g of ghosts){if(g.life<=0){o=g;break;}} const r=ghost(h,false); if(r&&r.obj)o=r; else if(o&&o.life<=0)o=null; if(!o)return null;
   if(rot){ const q=o.obj.material?o.obj:null; if(q)q.material.rotation+=rot; else { if(o.body)o.body.material.rotation+=rot; if(o.edge)o.edge.material.rotation+=rot; } }   // a sprite ghost, or 15's ink-rim Group of two
@@ -3724,11 +3758,11 @@ function renderUpdate(rdt,alpha){
   // afterimages and dust. Each ghost is one drawing behind the last (spawned on the beat, not a timer); the sweep and the stinger draw three bodies in one frame
   trailT-=rdt;
   if(P.dashT>0){ if(dashFrameK<0&&typeof smear==='function')smear(spr,P.dashDx,P.dashDz,'one');   // the launch: one drawing stretched along the dash (15's smear pool), under the first frame card
-    if(ANIM.step){const u=1-P.dashT/T.DASH_T,k=u<0.36?0:u<0.72?1:2;if(k!==dashFrameK){dashFrameK=k;frameCard(vx,vz,k,spr.flip);}else ghost(spr,false);mark(vx-P.dashDx*0.6,vz-P.dashDz*0.6,Math.atan2(P.dashDz,P.dashDx),false);} }
+    if(ANIM.step){const u=1-P.dashT/T.DASH_T,k=u<0.36?0:u<0.72?1:2;if(k!==dashFrameK){dashFrameK=k;frameCard(vx,vz,k,spr.flip);}else trailGhost(vx,vz);mark(vx-P.dashDx*0.6,vz-P.dashDz*0.6,Math.atan2(P.dashDz,P.dashDx),false);} }
   else { dashFrameK=-1;
     if(P.atk>=0&&!ranged){ const a=atkDef(P.atk);
       if(P.atkT>=a.wind&&!multDone){ multDone=true; if((a.sweep||P.atk===4)&&inkHas(0.3))ghostOf(spr,-0.16*P.facing,inkMix(0.07,0.1),-P.aimx*MULT_BACK,-P.aimz*MULT_BACK); }   /* FIX3: one faint trailing drawing behind the blow, never a stack on the body */
-      else if(P.lunged&&ANIM.step&&P.atkT<a.wind+a.active+0.04&&inkHas(0.4))ghost(spr,false); }   /* INK_D: the lunge's own trailing drawing goes first on a spare page */
+      else if(P.lunged&&ANIM.step&&P.atkT<a.wind+a.active+0.04&&inkHas(0.4))trailGhost(vx,vz); }   /* INK_D: the lunge's own trailing drawing goes first on a spare page. FIX4: distance-gated (GHOST_GAP) -- it used to print a copy on the body every beat of every swing */
     else if(planar>T.WALK*0.7&&trailT<=0){trailT=0.06;puff(dust,vx-P.vx*0.03,vz-P.vz*0.03,0.1,-P.vx*0.15+rnd(-0.6,0.6),-P.vz*0.15+rnd(-0.6,0.6),0.6,0.36,0.85);} }
   // enemies
   for(const e of enemies){
@@ -3790,7 +3824,7 @@ function renderUpdate(rdt,alpha){
   updateHUD(rdt);
 }
 // debug: the animation section's state for the headless probe (pw/anim-probe.js)
-window.__ANIM={ANIM,AN,RUN_POSE,HOP,SHEET_PX,silhouettePx,animReset,get spr(){return spr;},get ghosts(){return ghosts;},get bits(){return bits;},get sclY(){return sclY;},get sclV(){return sclV;},get turnK(){return turnK;},get strikeSnap(){return strikeSnap;},get smashT(){return smashT;},get slamT(){return slamT;},get holdT(){return holdT;},get heroShiv(){return heroShiv;}};
+window.__ANIM={ANIM,AN,RUN_POSE,HOP,SHEET_PX,silhouettePx,animReset,get spr(){return spr;},get ghosts(){return ghosts;},get smears(){return smears;},get marks(){return marks;},get heroTails(){return heroTails;},get ghostGap(){return GHOST_GAP;},get bits(){return bits;},get sclY(){return sclY;},get sclV(){return sclV;},get turnK(){return turnK;},get strikeSnap(){return strikeSnap;},get smashT(){return smashT;},get slamT(){return slamT;},get holdT(){return holdT;},get heroShiv(){return heroShiv;}};
 // ---------------- MANGA LAYER: the director ----------------
 // One beat per moment. Priorities resolve collisions (kill > heavy > hurt > dash), one
 // panel slot with eased hand-offs, one word, one star, one focus set, one wash.
@@ -3888,7 +3922,7 @@ function placeAway(x,z,dist,rx,ry,drift){const [sx,sy]=toScreen(x,0.6,z),[px,py]
   const HR=(typeof HUD_RECTS!=='undefined')?HUD_RECTS:null;
   const cards=[];for(const p of [M.panel,M.pending])if(p&&p.kind!=='death'&&p.phase!=='close'){const hm=panelHome(p);cards.push({cx:hm.cx,cy:hm.cy,w:hm.w+52*S,h:hm.h+52*S,ang:hm.ang});}   // a closing card is gone before the balloon settles; a queued one is about to land. The rect is grown for the card's shadow plate and border
   if(M.star&&M.star.hold&&M.star.t<M.star.life*0.85){const st=M.star,r=(st.kill?108:st.big?84:78)*S;cards.push({cx:st.sx,cy:st.sy,w:2*r*(st.wide||1),h:2*r,ang:0});}   // the balloon on screen is an obstacle for everything placed after it
-  for(const q of M.nums){if(q.t>q.life*0.8)continue;const [qx,qy]=numPos(q);cards.push({cx:qx,cy:qy,w:(q.big||q.crit?74:54)*S*Math.max(1,q.val.length*0.62),h:(q.big||q.crit?58:42)*S,ang:0});}   // and so is every number still on screen
+  for(const q of M.nums){if(q.t>q.life*0.8)continue;const [qx,qy]=numPos(q);cards.push({cx:qx,cy:qy,w:numSize(q)*S*1.1*Math.max(1.2,q.val.length*0.64),h:numSize(q)*S*1.45,ang:0});}   // and so is every number still on screen (FIX4: sized off numSize)
   rx=rx||0;ry=ry||rx;dist*=S;rx*=S;ry*=S;drift=(drift||0)*S;let best=null,bs=-1e9;   // callers speak in design px
   for(let ring=0;ring<RINGS.length;ring++){const d=ring<RINGS.length-1?dist*RINGS[ring][0]:Math.max(dist*RINGS[ring][0],IH*0.34),sq=RINGS[ring][1];   // the last ring always reaches past a mid-screen band, whatever the screen height
     for(let i=0;i<12;i++){const a=i/12*6.283+Math.random()*0.5/(ring+1),ox=sx+Math.cos(a)*d,oy=sy+Math.sin(a)*d*sq-20*S,cx=clamp(ox,150*S,IW-150*S),cy=clamp(oy,120*S,IH-90*S);   // score where the draw clamp will actually put it; outer rings sample evenly
@@ -4017,7 +4051,7 @@ function drawPows(){
 const _tBox=[];
 function tickLayout(){ _tBox.length=0;
   for(const n of M.nums){ if(n.t>=n.life)continue; const [qx,qy]=numPos(n),sz=numSize(n)*S;
-    _tBox.push([qx,qy,sz*0.31*Math.max(1,n.val.length)+7*S,sz*0.42]); }
+    _tBox.push([qx,qy,sz*0.32*Math.max(1,n.val.length)+10*S,sz*0.5]); }   /* FIX4: the halo grew with the digits */
   for(const k of M.ticks){ if(k._ox!=null)continue; k._ox=0;k._oy=0;
     const fs=(k.big?26:20);ictx.font='italic '+fs+'px '+FONT_POW;
     const hw=ictx.measureText(k.text).width*S*0.5+6*S,hh=fs*S*0.5;
@@ -4046,22 +4080,27 @@ function drawTicks(){ tickLayout();
 // the quantised device scale so it stays crisp on hi-dpi and under the UI scale; FIFO-capped so the map cannot grow with a run.
 const _glyph=new Map(), _glyphQ=[];
 const GK=()=>Math.min(3,Math.max(1,Math.round(S*IDPR*4)/4));
-function glyphBmp(ch,size,big,crit,fill,K){
-  const key=ch+'|'+size+'|'+(big?1:0)+(crit?1:0)+'|'+fill+'|'+K;
+/* FIX4 (the user: "damage is still hard to see"): the classic readable style. Two-tone SATURATED fills -- yellow->orange for a hit landed,
+   gold for a crit, red for damage taken, green for a heal, cyan for energy, a muted yellow for the companion's -- in a THICK ink outline,
+   on a wide PAPER halo with an ink DROP behind it, so a digit reads on the green field, on a roof and on paper alike. Baked in two layers
+   (0 = drop + halo, 1 = extrusion + outline + fill) and drawn halo-pass-first by drawNums, so a digit's halo never eats its neighbour. */
+const NUM_FILL={hit:['#fff27a','#ff9a1e'],crit:['#ffe066','#e8890a'],red:['#ff7a5a','#cc2a1c'],heal:['#b0f07a','#3f9f3a'],en:['#8fe9ff','#2a96d2'],ally:['#ffeaa8','#dcae4a']};
+function glyphBmp(ch,size,big,crit,fill,K,layer){
+  const key=ch+'|'+size+'|'+(big?1:0)+(crit?1:0)+'|'+fill+'|'+K+'|'+(layer|0);
   let g=_glyph.get(key); if(g)return g;
-  const pad=Math.ceil(size*0.6), w=Math.ceil((size*1.2+pad*2)*K), h=Math.ceil((size*1.6+pad*2)*K);
+  const pad=Math.ceil(size*0.7), w=Math.ceil((size*1.2+pad*2)*K), h=Math.ceil((size*1.6+pad*2)*K);
   const c=document.createElement('canvas'); c.width=w; c.height=h; const x=c.getContext('2d');
   x.setTransform(K,0,0,K,w*0.5,h*0.5);
   x.font=size+'px '+FONT_POW; x.textAlign='center'; x.textBaseline='middle'; x.lineJoin='round';
-  /* FIX3 (the user: "need damage numbers"): a normal hit was a paper-cream digit on the cream page. Now, outside-in: a thin INK outer
-     line, a WIDE PAPER halo (the knockout that reads over bodies, decals and ink alike), the ink extrusion on big/crit, an ink plate,
-     then the fill -- ink for a normal hit, gold on ink for a crit, red on ink for damage taken */
-  const halo=size*0.34;
-  x.lineWidth=halo+size*0.09; x.strokeStyle='#14151c'; x.strokeText(ch,0,0);
-  x.lineWidth=halo; x.strokeStyle='#f2ead6'; x.strokeText(ch,0,0);
-  if(big||crit){ x.lineWidth=size*0.15; x.strokeStyle='#14151c'; for(let k=2;k>0;k--)x.strokeText(ch,k*size*0.045,k*size*0.055); }   // the stacked extrusion, heavy hits only
-  x.lineWidth=size*(crit?0.2:0.12); x.strokeStyle='#14151c'; x.strokeText(ch,0,0);   // the ink plate the fill sits on
-  x.fillStyle=fill; x.fillText(ch,0,0);
+  const F=NUM_FILL[fill]||NUM_FILL.hit, halo=size*0.40;
+  if(!layer){
+    x.lineWidth=halo; x.strokeStyle='#14151c'; x.strokeText(ch,size*0.06,size*0.08);                                                    // the ink drop, down-right
+    x.lineWidth=halo; x.strokeStyle='#fbf6ea'; x.strokeText(ch,0,0);                                                                    // the paper halo over it
+  } else {
+    if(big||crit){ x.lineWidth=size*0.2; x.strokeStyle='#14151c'; for(let k=3;k>0;k--)x.strokeText(ch,k*size*0.035,k*size*0.045); }   // the stacked extrusion, heavy hits only
+    x.lineWidth=size*(crit?0.24:0.2); x.strokeStyle='#14151c'; x.strokeText(ch,0,0);                                                   // the thick ink outline the fill sits in
+    const gr=x.createLinearGradient(0,-size*0.45,0,size*0.4); gr.addColorStop(0,F[0]); gr.addColorStop(1,F[1]); x.fillStyle=gr; x.fillText(ch,0,0);
+  }
   g={c,w:w/K,h:h/K}; _glyph.set(key,g); _glyphQ.push(key);
   if(_glyphQ.length>240){const o=_glyphQ.shift(); _glyph.delete(o);}
   return g; }
@@ -4087,18 +4126,20 @@ function wordBmp(key,K,sizer,paint){
   g={c,w,h,ox:wh[2]||0,oy:wh[3]||0,px:c.width*c.height,u:++_wordU}; _word.set(key,g); _wordPx+=g.px; wordEvict(); return g;}
 const wordBlit=(g,k)=>{const q=k||1;ictx.drawImage(g.c,(-g.w*0.5+g.ox)*q,(-g.h*0.5+g.oy)*q,g.w*q,g.h*q);};
 function wordCacheClear(){_word.clear();_wordPx=0;}
-const numSize=n=>n.crit?48:n.big?40:n.ally?26:32;   /* FIX3: 36/30/20/24 -> 48/40/26/32 (x S); one table for drawNums, tickLayout and the poster keep-out */
+const numSize=n=>n.crit?60:n.big?50:n.ally?34:40;   /* FIX4: 48/40/26/32 -> 60/50/34/40 (x S, S=1 at 1080p; the UI floor only raises S on small windows). One table for drawNums, tickLayout and the poster keep-out */
 function drawNums(){
   for(const n of M.nums){const t=n.t/n.life,[px,py]=numPos(n);
-    const size=numSize(n), out=t>0.7?1-easeIn((t-0.7)/0.3):1, mg=(n.merge>0?1+0.45*easeOut(n.merge/0.22):1)*(1+0.1*Math.min(4,n.merges||0)), bk=SET.sketch>0?(n.t<0.25?Math.floor(n.t*12):9)+(n.seed||0):0;   // a merged hit re-pops the whole number and it GROWS a tenth per hit folded in (FIX3); the glyphs boil for three drawings then settle
-    ictx.save();ictx.translate(px,py);ictx.scale(S,S);ictx.rotate(n.rot*(1-t*0.6));ictx.scale(Math.max(0.001,out)*mg,Math.max(0.001,out)*mg);ictx.globalAlpha=1;
+    const size=numSize(n), out=t>0.78?1-easeIn((t-0.78)/0.22):1, mg=(n.merge>0?1+0.45*easeOut(n.merge/0.22):1)*(1+0.1*Math.min(4,n.merges||0)), bk=SET.sketch>0?(n.t<0.25?Math.floor(n.t*12):9)+(n.seed||0):0;   // a merged hit re-pops the whole number and it GROWS a tenth per hit folded in (FIX3); the glyphs boil for three drawings then settle
+    const sc=(0.85+0.15*out)*mg;
+    ictx.save();ictx.translate(px,py);ictx.scale(S,S);ictx.rotate(n.rot*(1-t*0.6));ictx.scale(sc,sc);ictx.globalAlpha=Math.max(0,out);   /* FIX4: the number HOLDS its size and fades over its last fifth (it used to shrink away over the last third, unreadable for 0.16 s of a 0.55 s life) */
     ictx.font=size+'px '+FONT_POW;ictx.textAlign='center';ictx.textBaseline='middle';ictx.lineJoin='round';
-    const fill=n.en?'#5fb0a4':n.heal?'#6fb06a':n.red?'#c94a37':n.ally?'#e8dcb0':n.crit?'#e0b84a':'#14151c';   /* FIX3: ink digits on the paper halo for a hit landed (was paper-cream on paper); gold on ink for a crit; red for damage taken */
-    const chars=n.val.split(''),wTot=chars.length*size*0.62;let x=-wTot/2+size*0.31;
-    for(let i=0;i<chars.length;i++){const st=n.settled?1:Math.max(0,Math.min(1,(t-i*0.02)/0.09)),pop=st<0.4?0.3+st/0.4*1.3:1.6-(st-0.4)/0.6*0.6;   // a quick digit ripple on the first pop only (FIX3: snappier -- 0.3 -> 1.6 -> 1 in 90 ms); a merged number re-pops as one
-      const gx=bk?(h1(i*3+1,bk)-0.5)*1.6:0,gy=bk?(h1(i*3+2,bk)-0.5)*1.6:0,gr=bk?(h1(i*3+3,bk)-0.5)*0.06:0;
-      const gb=glyphBmp(chars[i],size,!!n.big,!!n.crit,fill,GK());
-      ictx.save();ictx.translate(x+gx,gy);ictx.rotate(gr);ictx.scale(pop,pop);ictx.drawImage(gb.c,-gb.w*0.5,-gb.h*0.5,gb.w,gb.h);ictx.restore();x+=size*0.62;}
+    const fill=n.en?'en':n.heal?'heal':n.red?'red':n.ally?'ally':n.crit?'crit':'hit';   /* FIX4: NUM_FILL keys -- saturated two-tone fills */
+    const chars=n.val.split(''),adv=size*0.64,wTot=chars.length*adv;
+    for(let layer=0;layer<2;layer++){let x=-wTot/2+adv*0.5;   /* every digit's halo first, then every outline + fill (glyphBmp's two layers) */
+      for(let i=0;i<chars.length;i++){const st=n.settled?1:Math.max(0,Math.min(1,(t-i*0.02)/0.09)),pop=st<0.4?0.3+st/0.4*1.3:1.6-(st-0.4)/0.6*0.6;   // a quick digit ripple on the first pop only (FIX3: snappier -- 0.3 -> 1.6 -> 1 in 90 ms); a merged number re-pops as one
+        const gx=bk?(h1(i*3+1,bk)-0.5)*1.6:0,gy=bk?(h1(i*3+2,bk)-0.5)*1.6:0,gr=bk?(h1(i*3+3,bk)-0.5)*0.06:0;
+        const gb=glyphBmp(chars[i],size,!!n.big,!!n.crit,fill,GK(),layer);
+        ictx.save();ictx.translate(x+gx,gy);ictx.rotate(gr);ictx.scale(pop,pop);ictx.drawImage(gb.c,-gb.w*0.5,-gb.h*0.5,gb.w,gb.h);ictx.restore();x+=adv;}}
     ictx.restore();}
 }
 function screenAngle(x,z,ax,az){const [x0,y0]=toScreen(x,0.5,z),[x1,y1]=toScreen(x+ax,0.5,z+az);return [x0,y0,Math.atan2(y1-y0,x1-x0)];}
@@ -4187,13 +4228,13 @@ function drawAbilFx(){
     const pop=STYLE.popT>0?1+0.45*(STYLE.popT/0.5):1, jt=SET.sketch>0?Math.floor(performance.now()/60):0, g=RANKS[STYLE.rank]||'D';
     ictx.save();ictx.translate(gx+(h1(1,jt)-0.5)*3*S,gy+(h1(2,jt)-0.5)*3*S);ictx.scale(S*pop,S*pop);ictx.rotate(-0.07+(h1(3,jt)-0.5)*0.06);
     if(STYLE.rank>=4)drawSplatter(-26,4,1.5,jt%40);
-    const rfs=STYLE.rank>=4?96:80, rfill=STYLE.rank>=4?'#ffd24a':STYLE.rank>=2?'#fbf6ea':'#14151c';   /* VIS-11: D and C were #bdb5a0 on #f2ead6 paper -- the ranks you spend most of a run at were the ones you could not read. CRISP: they are solid ink now, not a grey-brown */
+    const rfs=STYLE.rank>=4?96:80, rfill=STYLE.rank>=4?'#ffd24a':STYLE.rank>=2?'#ffe9a0':'#fbf6ea';   /* VIS-11: D and C were #bdb5a0 on #f2ead6 paper -- unreadable. CRISP made them SOLID INK, and an ink-filled 80px letter inside a 10px ink strokeText closes its own counter: the D rank printed as a solid black blob over the world at the combo stack's corner (the user's s4-03-combo.png top right; FIX4 traced it with a per-call ink-canvas instrument, pw-fix4-blob7.js). Paper fill in the ink outline now, straw from B, gold from S: a LETTER on every background */
     ictx.font=rfs+'px '+FONT_POW;try{ictx.letterSpacing='0px';}catch(e){}ictx.textAlign='right';ictx.textBaseline='middle';ictx.lineJoin='round';
     wordBlit(wordBmp('R|'+g+'|'+rfs+'|'+rfill+'|'+GK(),GK(),
       ()=>{const tw=ictx.measureText(g).width,pad=rfs*0.3+16;return [tw+pad*2, rfs*1.6+pad*2, -tw*0.5, 0];},   /* the glyph is drawn right-aligned, so the bake is centred and the blit shifts left by half the glyph */
       x=>{x.font=rfs+'px '+FONT_POW;
-        x.lineWidth=10;x.strokeStyle='#14151c';x.strokeText(g,0,0);
-        x.fillStyle=rfill;x.fillText(g,0,0);}));
+        x.lineWidth=9;x.strokeStyle='#14151c';x.strokeText(g,0,0);
+        x.fillStyle=rfill;x.fillText(g,0,0);}));   /* FIX4: 10 -> 9: the outline stays heavy but no longer eats the counter of a D or an A */
     { const w=54,y=42,k=clamp(STYLE.g/100,0,1);ictx.lineWidth=5;ictx.strokeStyle='#14151c';ictx.beginPath();ictx.moveTo(-w,y);ictx.lineTo(0,y);ictx.stroke();
       ictx.lineWidth=2.6;ictx.strokeStyle=STYLE.rank>=4?'#ffd24a':'#fbf6ea';ictx.beginPath();ictx.moveTo(-w,y);ictx.lineTo(-w+w*k,y);ictx.stroke(); }   // the pencil bar under it: how far to the next rank
     ictx.restore(); } }
@@ -4801,7 +4842,7 @@ void main(){
 // Texture reads per pixel, clean full path: 8 (nP, nA, the wash, the boiled ink read, 4 Sobel taps). Dirty full path: 11. LINES (cheap): 2.
 const SKETCH_FS=`
 uniform sampler2D tScene; uniform sampler2D tNoise; uniform vec2 texel; uniform vec2 outPx; uniform vec2 hd0; uniform vec2 hd1; uniform vec2 hd2;
-uniform float seed; uniform float invert; uniform float mono; uniform float cheap; uniform float peril; uniform float hatchK; uniform float washK; uniform float duoK; uniform float satK; uniform float boilPx; uniform float sobLo; uniform float sobHi; uniform float clar; uniform float quantK; uniform float curveK;
+uniform float seed; uniform float invert; uniform float mono; uniform float cheap; uniform float peril; uniform float hatchK; uniform float washK; uniform float duoK; uniform float satK; uniform float boilPx; uniform float sobLo; uniform float sobHi; uniform float clar; uniform float quantK; uniform float curveK; uniform float shadowK; uniform float shadowLo;
 uniform vec3 paper; uniform vec3 inkc;
 varying vec2 vUv;
 float lum(vec3 c){ return dot(c,vec3(0.299,0.587,0.114)); }
@@ -4869,6 +4910,7 @@ void main(){
     h=max(h,hatchLine(pc,hd1,hp,hw,-wob)*smoothstep(mix(0.40,0.22,clar),mix(0.26,0.12,clar),lw)*mix(0.55,0.0,clar));
     h=max(h,hatchLine(pc,hd2,hp*0.85,hw*1.1,wob*0.7)*smoothstep(mix(0.24,0.14,clar),mix(0.12,0.05,clar),lw)*mix(0.60,0.0,clar));
   }
+  h=max(h,hatchLine(pc,hd0,hp,hw,wob)*smoothstep(shadowLo,shadowLo*0.45,lw)*shadowK);                    // FIX4: the coloured page keeps ONE light pencil band, in true shadow only (a wash darker than shadowLo: the dark side of a roof, never a mid-tone, never the grass)
   h*=(0.6+0.4*nQ.r)*hatchK;                                                                          // a hand never fills a band evenly
   // a line used to be a dark version of what it crosses; CRISP: every line is the page's one ink (the dirty end keeps the tinted line)
   vec3 lineC=mix(c*0.35,inkc,mix(baked,1.0,clar));
@@ -5334,14 +5376,14 @@ const postScene=new THREE.Scene(), postCam=new THREE.OrthographicCamera(-1,1,1,-
 // 0.50 / 0.40 is ink AND WASH, which is what PLAN.md 2.0 asks for: a red roof still reads red, a blue roof still reads
 // blue, a tree still reads green -- but all three are tinted toward the same pair of inks, so the page is one drawing
 // instead of pixel art under a filter. 0.85 / 0.42 unified the page but took it most of the way to pure graphite.
-const WASH_DUO=clMix(0.50,0.0), WASH_SAT=clMix(0.40,0.0);   /* CLARITY (12-renderer-textures): 0.50/0.40 was grey-on-grey -- roofs, trees, the plume and the enemies all went to one graphite. CRISP (0b): clean, NEITHER -- the pixel art's own hues at their own chroma. (A negative WASH_SAT would be a chroma boost; the S-curve below already lifts the colour pop, so it stays at 0.) */
+const WASH_DUO=clMix(0.50,0.0), WASH_SAT=clMix(0.40,1-COLOUR_SAT);   /* FIX4: the clean page keeps COLOUR_SAT (12-renderer-textures, next to CLARITY) of every hue -- 1.0 = the original game's colour, untouched */   /* CLARITY (12-renderer-textures): 0.50/0.40 was grey-on-grey -- roofs, trees, the plume and the enemies all went to one graphite. CRISP (0b): clean, NEITHER -- the pixel art's own hues at their own chroma. (A negative WASH_SAT would be a chroma boost; the S-curve below already lifts the colour pop, so it stays at 0.) */
 // CRISP (0b), two more post-pass knobs beside them (both uniforms, so a probe can A/B them live: __HV.SK.uniforms.quantK / curveK):
 //   WASH_Q   how far a fill's value snaps to six steps. Clean 0: pixel art is flat already, and the snap only pushed every fill off its own value (the roofs banded).
 //   CURVE_K  the wash's S-curve strength between the page's ink and paper, per channel: 0 = the art's own values, 1 = a full smoothstep. A little contrast, the paper and the ink untouched.
 const WASH_Q=clMix(0.6,0.0), CURVE_K=clMix(0.0,0.35);
 const SK=new THREE.ShaderMaterial({uniforms:{tScene:{value:sceneRT.texture},tNoise:{value:tNoise},texel:{value:new THREE.Vector2(1,1)},outPx:{value:new THREE.Vector2(1,1)},
     hd0:{value:new THREE.Vector2(Math.cos(0.80),Math.sin(0.80))},hd1:{value:new THREE.Vector2(Math.cos(-0.80),Math.sin(-0.80))},hd2:{value:new THREE.Vector2(Math.cos(0.12),Math.sin(0.12))},   // 45deg, 135deg, ~7deg: the three hatch directions
-    seed:{value:0},invert:{value:0},mono:{value:0},cheap:{value:0},peril:{value:0},hatchK:{value:1},washK:{value:1},duoK:{value:WASH_DUO},satK:{value:WASH_SAT},clar:{value:CLARITY},boilPx:{value:clMix(1.2,1.0)},sobLo:{value:0.4},sobHi:{value:0.6},quantK:{value:WASH_Q},curveK:{value:CURVE_K},
+    seed:{value:0},invert:{value:0},mono:{value:0},cheap:{value:0},peril:{value:0},hatchK:{value:1},washK:{value:1},duoK:{value:WASH_DUO},satK:{value:WASH_SAT},clar:{value:CLARITY},boilPx:{value:clMix(1.2,1.0)},sobLo:{value:0.4},sobHi:{value:0.6},quantK:{value:WASH_Q},curveK:{value:CURVE_K},shadowK:{value:SHADOW_HATCH},shadowLo:{value:SHADOW_LO},   /* FIX4: the one light pencil band left, true shadow only (12's SHADOW_HATCH / SHADOW_LO) */
     paper:{value:new THREE.Color(PAPER)},inkc:{value:new THREE.Color(INK)}},
   vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',fragmentShader:SKETCH_FS,depthTest:false,depthWrite:false});
 { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2),SK); q.frustumCulled=false; postScene.add(q); }
@@ -5368,7 +5410,7 @@ async function boot(){
   await FONTS_READY;   // Bangers / Patrick Hand SC, or 1.5 s, whichever comes first: the ink layer's first measureText sees the real faces
   const keysList=Object.keys(SHEETS);
   const imgs=await Promise.all(keysList.map(k=>loadImage(SHEETS[k].d)));
-  keysList.forEach((k,i)=>{sheetTex[k]=pixel(makeTex(hatchSheet(imgs[i],SHEETS[k].fw,{lift:SPR_LIFT})));const o=outlineStack(imgs[i],'#05060a',true),op=outlineStack(imgs[i],'#05060a',false),h=haloSheet(imgs[i]);sheetOutl[k]=o?pixel(makeTex(o)):sheetTex[k];sheetOutlPlain[k]=op?pixel(makeTex(op)):sheetTex[k];sheetHalo[k]=h?pixel(makeTex(h)):sheetTex[k];
+  keysList.forEach((k,i)=>{sheetTex[k]=pixel(makeTex(hatchSheet(imgs[i],SHEETS[k].fw,{lift:SPR_LIFT})));const o=ringStack(imgs[i],'#05060a',true),op=outlineStack(imgs[i],'#05060a',false),rg=ringStack(imgs[i],'#05060a',false),h=haloSheet(imgs[i]);sheetOutl[k]=o?pixel(makeTex(o)):sheetTex[k];sheetOutlPlain[k]=op?pixel(makeTex(op)):sheetTex[k];sheetRing[k]=rg?pixel(makeTex(rg)):null;sheetHalo[k]=h?pixel(makeTex(h)):sheetTex[k];   /* FIX4: the page's stacks are HOLLOW (12's ringStack): the actor's line + gap + rim, and the bare contour the afterimage pools draw; OFF keeps its filled stack */
     const bb=bodyBox(imgs[i],SHEETS[k].n); if(bb)SHEETS[k].bw=bb.w;});   // three boiling ink variants per sheet (each with the two-tone rim baked under it), one halo (the rim alone); and the first frame's body width, for the shadow ellipse
   const natKeys=Object.keys(NAT); const nimgs=await Promise.all(natKeys.map(k=>loadImage(NAT[k].d)));
   natKeys.forEach((k,i)=>{natTex[k]=pixel(makeTex(natBake(nimgs[i],true)));natTexPlain[k]=pixel(makeTex(natBake(nimgs[i],false)));});
@@ -5516,7 +5558,7 @@ try{ cEl.addEventListener('webglcontextlost',ev=>{ ev.preventDefault(); ctxLost=
 }catch(e){}
 sketchReady=true; refreshSketch(); fitPost();
 boot().catch(e=>{document.getElementById('sub').textContent='load failed: '+e.message;console.error(e);});
-window.__HV={CLARITY,clMix,WASH_Q,CURVE_K,P,enemies,T,cam,startGame,travel,scene,AR,ARC,arrowPool,camera,toScreen,keys,portals,ULT,SET,WAVE,applyRoster,crates,pickups,BOIL,SK,present,refreshSketch,fitPost,SPRITES,
+window.__HV={CLARITY,clMix,FLOOR_TINT,COLOUR_SAT,SHADOW_HATCH,SHADOW_LO,WASH_Q,CURVE_K,P,enemies,T,cam,startGame,travel,scene,AR,ARC,arrowPool,camera,toScreen,keys,portals,ULT,SET,WAVE,applyRoster,crates,pickups,BOIL,SK,present,refreshSketch,fitPost,SPRITES,
   texCensus(){let rig=0;for(const o of SPRITES)for(const c of [o.tex,o.otex,o.utex,o.htex])if(c)rig+=Object.keys(c).length;   /* PERF-1: what the actor rigs are actually holding, vs renderer.info.memory.textures */
     const bound=new Set();try{scene.traverse(q=>{const m=q.material;if(!m)return;for(const mm of (Array.isArray(m)?m:[m]))if(mm&&mm.map)bound.add(mm.map);});}catch(e){}
     return {rigs:SPRITES.length,rigClones:rig,boundInScene:bound.size,gl:renderer.info.memory.textures};},get timeScale(){return timeScale;},get paused(){return paused;},get zoom(){return camZoom;},get hitstop(){return hitstop;},get running(){return running;},get prIdx(){return prIdx;},set prIdx(v){prIdx=clamp(v|0,0,prLadder.length-1);renderer.setPixelRatio(prLadder[prIdx]);fitPost();inkRung();},get ladderLock(){return ladderLock;},set ladderLock(v){ladderLock=!!v;},get impactT(){return impactT;},set impactT(v){impactT=+v||0;},ANIM,commitPose,animClock,
