@@ -504,7 +504,13 @@ let OUTL_ROWS=1;
 // and the full draw; kept), the enemies' halo[0] stays what 24 uses it for (the two-frame solid hit silhouette), and the grey under-stroke sprite is gone.
 // CLARITY r4: `rim` false bakes the PLAIN stack -- the three boiling line variants alone, no gap, no rim -- which is what SKETCH OFF draws (28's refreshSketch
 // swaps the two through 13's reink()), so the untouched green-grass game never wears the paper's cut-out treatment.
-function outlineStack(img,color,rim){ if(window.HV_MAKE_TEX) return null; const W=img.width,H=img.height,c=document.createElement('canvas');c.width=W;c.height=H*3;const g=c.getContext('2d'),halo=rim===false?null:haloSheet(img);
+/* RENDER1 (2026-09-13): the user -- "the white outline rn is making them look super cheap". The paper GAP inside the rim printed a white/cream ring
+   round every actor and prop: a sticker, not a drawing. The rim is now ONE dark ink band (inkRim: a 2-texel dilation, no gap) under the boiling
+   1-texel line, so a body is a coloured drawing inside a single dark contour. haloSheet (gap + rim) survives only as the enemies' two-frame hit
+   silhouette and SKETCH OFF's hero halo; nothing on the page draws it as an outline any more. Actors keep only their 1-texel line (their texels are
+   big); inkRim is the props' contour (natBake). */
+function inkRim(img,color){ return outlineSheet(img,2,color||'#14151c',0); }
+function outlineStack(img,color,rim){ if(window.HV_MAKE_TEX) return null; const W=img.width,H=img.height,c=document.createElement('canvas');c.width=W;c.height=H*3;const g=c.getContext('2d'),halo=null;   /* RENDER1: no rim under an actor's line at all -- the hero/companion frames are 0.09 tiles a texel, so even a 2-texel ink band printed a fat black mass round them. `rim` is kept for the callers; the stack is the boiling 1-texel line */
   for(let v=0;v<3;v++){if(halo)g.drawImage(halo,0,(2-v)*H);g.drawImage(outlineSheet(img,1,color,v),0,(2-v)*H);} OUTL_ROWS=3; return c; }
 /* FIX4 -- THE LINE-ONLY STACK. outlineSheet() is a dilation + source-in fill: a SOLID silhouette, not a line. Under an opaque body only its
    one-texel margin shows, which is what let it pass for a line; drawn anywhere WITHOUT a body over it (an afterimage, a smear, a faded body
@@ -518,7 +524,7 @@ function ringStack(img,color,rim){ const c=outlineStack(img,color,rim); if(!c)re
 // CRISP (0b): props get the actors' treatment -- ink rim, paper gap, ink line, then the art at its own colours. The form-turn gradient and the hatch are off on the clean page (they were dark paper mixed into every fill).
 // CLARITY r4: `rim` false is the OFF bake (outline under, image over -- the M1 look, no gap/rim); 28's refreshSketch swaps natTex/natTexPlain on every prop.
 function natBake(img,rim){ if(window.HV_MAKE_TEX) return img; const W=img.width,H=img.height,c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');
-  if(rim!==false)g.drawImage(haloSheet(img),0,0); g.drawImage(outlineSheet(img,1,'#14151c',0),0,0); g.drawImage(img,0,0);
+  if(rim!==false)g.drawImage(inkRim(img,'#14151c'),0,0); g.drawImage(outlineSheet(img,1,'#14151c',0),0,0); g.drawImage(img,0,0);   /* RENDER1: one dark ink contour, no paper gap (was haloSheet: a cream ring round every house, tree, lamp and barrel) */
   const turn=clMix(0.2,0.0); if(turn>0){ g.globalCompositeOperation='source-atop'; const gr=g.createLinearGradient(W*0.35,H*0.25,W,H); gr.addColorStop(0,'rgba(20,21,28,0)'); gr.addColorStop(1,'rgba(20,21,28,'+turn.toFixed(3)+')'); g.fillStyle=gr; g.fillRect(0,0,W,H); g.globalCompositeOperation='source-over'; }   /* the form turn: dirty page only */
   return hatchSheet(c,W,{pitch:Math.max(4,Math.round(H/16)),alpha:clMix(0.24,0.0),cross:clMix(0.08,0.0)}); }   /* CLARITY: a red roof reads red, not red under a grey screen */
 // the ground is a page: graphite grass ticks all leaning one way, tufts and pebbles, drawn once at boot (LCG-deterministic) and tiled. Light strokes, so the post pass reads them as pencil, not as edges to ink.
@@ -980,7 +986,7 @@ function shapeMesh(pts,color,scale,order,map,flipX){const sh=new THREE.Shape(pts
 // speed tails on the knight himself while dashing: tapered ink streaks with a white core, in the motion frame
 const heroTails=new THREE.Group(); heroTails.visible=false; scene.add(heroTails);
 const heroTailParts=[];
-for(const [yy,len,th] of [[-0.38,1.5,0.17],[0.06,2.0,0.22],[0.48,1.25,0.15]]){const tl=shapeMesh([[-1.3,yy-th],[-1.3-len,yy],[-1.3,yy+th]],0x14151c,1.0,4999);const wl=shapeMesh([[-1.28,yy-th*0.4],[-1.3-len*0.72,yy],[-1.28,yy+th*0.4]],0xffffff,1.0,4999.5);heroTails.add(tl,wl);heroTailParts.push(tl,wl);}   /* FIX4: the streaks start 1.3 back -- outside the body's half-width (25 px of the 100 px frame = 1.13 tiles) -- so nothing ink-filled is ever drawn on his position */
+for(const [yy,len,th] of [[-0.38,1.5,0.17],[0.06,2.0,0.22],[0.48,1.25,0.15]]){const tl=shapeMesh([[-1.3,yy-th],[-1.3-len,yy],[-1.3,yy+th]],0x14151c,1.0,4999);heroTails.add(tl);heroTailParts.push(tl);}   /* RENDER1: the white core streak inside each tail is gone -- a speed line is one dark taper, never a white sliver */   /* FIX4: the streaks start 1.3 back -- outside the body's half-width (25 px of the 100 px frame = 1.13 tiles) -- so nothing ink-filled is ever drawn on his position */
 function stepHeroTails(rdt,vx,vz){
   const on=P.dashT>0, after=P.sinceDashEnd<0.14;
   if(!on&&!after){heroTails.visible=false;return;}
@@ -1026,46 +1032,61 @@ function stepChargePanel(rdt,vx,vz){
   { const po=spr.sp.renderOrder-60; chargePanel.traverse(c=>{if(c.isMesh){if(c.userData.ro==null)c.userData.ro=c.renderOrder-4940;c.renderOrder=po+c.userData.ro;}}); }   // always just behind him, never over him (fixed orders sat above him in the top half of the map)   // four hard cuts a second
   outlPulse=Math.max(outlPulse,0.5);                                                        // outline stays fat
 }
-const frameCards=pool(6,()=>{const grp=new THREE.Group();grp.visible=false;scene.add(grp);return{obj:grp,max:1,k:-1,seq:0,x:0,z:0,parts:null,flip:false};});
-let frameSeq=0, dashCut=0; const camUp=new THREE.Vector3(), camRight=new THREE.Vector3();
-const _fa=new THREE.Vector3(), _fm=new THREE.Vector3();   // scratch: frameAnchor and the card's motion offset ran per card per frame
+/* RENDER1 (2026-09-13) -- THE DASH STROBE. The user: "the 3 frames for dashing are simply too spread apart and should be more on one line, these
+   frames should also appear behind buildings enemy and companion units etc, the white outline rn is making them look super cheap".
+   Each frame card used to be a torn WHITE paper panel (plate, white gap ring, graphite pass, white-cored tails) zig-zagged across the path and
+   fanned outward (VIS-16), drawn with depthTest off at the hero's own renderOrder-40 -- so it printed over every house, enemy and companion near him.
+   Now a card is just the knight's drawing -- the colour sheet frame over its dark ink contour, two sprites, no paper -- placed by the caller on the
+   dash line (24's DASH_GAP slots: one behind the other along the path, a body-width apart), never moved, never tilted. Its draw order comes from
+   ITS OWN world position every frame (fxOrder below), so whatever stands in front of it covers it. */
+const frameCards=pool(6,()=>{const grp=new THREE.Group();grp.visible=false;scene.add(grp);
+  const mk=()=>{const s=new THREE.Sprite(new THREE.SpriteMaterial({transparent:true,alphaTest:0.05,depthTest:false,depthWrite:false,color:0xffffff,opacity:1}));grp.add(s);return s;};
+  const line=mk(), body=mk(); return{obj:grp,body,line,max:1,k:-1,seq:0,x:0,z:0,flip:false,tex:null,otex:null,a0:1};});
+let frameSeq=0; const camUp=new THREE.Vector3(), camRight=new THREE.Vector3();
+const _fa=new THREE.Vector3(), _fm=new THREE.Vector3();   // scratch: frameAnchor (the framed ghosts' crop anchor) and fxOrder's projections
 function frameAnchor(x,z,f,flip){camUp.set(0,1,0).applyQuaternion(camera.quaternion);camRight.set(1,0,0).applyQuaternion(camera.quaternion);return _fa.set(x,0,z).addScaledVector(camUp,f.cy).addScaledVector(camRight,(flip?-f.cx:f.cx));}
-function cropOf(k){const c=CLS[P.cls].crop,base=FRAME_SPEC[k];return {crop:c,w:(c[1]-c[0])*T.HERO_W,h:(c[3]-c[2])*T.HERO_H,cx:((c[0]+c[1])/2-CLS[P.cls].cx)*T.HERO_W,cy:((1-CLS[P.cls].feet)-(c[2]+c[3])/2)*T.HERO_H,life:base.life,pts:base.pts};}
-function frameCard(x,z,k,flip){const o=take(frameCards),sp=cropOf(k),b=spr.sp.renderOrder-40+k*8,fx=!!flip; o.spec=sp;
-  while(o.obj.children.length){const c=o.obj.children[0];o.obj.remove(c);c.traverse(m=>{if(m.isMesh){m.geometry.dispose();m.material.dispose();}});} if(o.tex)o.tex.dispose(); if(o.otex)o.otex.dispose();   // a recycled slot frees its geometry, materials and the two texture clones (they leaked: geometries 35->145 after six dashes)
-  const tx=cloneTex(sheet(spr.anim)),ox=cloneTex(sheetOutl[spr.anim]),sd=SHEETS[spr.anim],idx=Math.min(sd.n-1,2+k*2),[x0,x1,y0,y1]=sp.crop;   // consecutive run frames across the strip
-  const uw=(x1-x0)/sd.n, ru=uw/sp.w, rv=(y1-y0)/sp.h;
-  for(const w2 of [tx,ox]){const ry=w2===ox?1/OUTL_ROWS:1;w2.repeat.set(fx?-ru:ru,rv*ry); w2.offset.set(fx?(idx+x1)/sd.n-ru*sp.w/2:(idx+x0)/sd.n+ru*sp.w/2,(1-y1+rv*sp.h/2)*ry);} o.otex=ox; o.oy0=ox.offset.y;   // the outline sheet is a three-row stack; the card reads row 0 and stepFrameCards moves the window to the boiling row
-  const [s0x,s0y,sang]=screenAngle(x,z,P.dashDx,P.dashDz); o.ang=-sang; o.mx=P.dashDx; o.mz=P.dashDz;
-  const dirSign=Math.abs(Math.cos(o.ang))<0.2?1:Math.sign(Math.cos(o.ang));   // +1 when the dash runs screen-right
-  const inner=new THREE.Group(); o.tilt=-(k%2?-1:1)*0.08*dirSign; o.size=1; inner.rotation.z=-o.ang+o.tilt;   // up-panels lean forward into the travel, down-panels lean back, whichever way you dash
-  if(k===0)dashCut=Math.floor(mrand()*CUTS.length);
-  const base=CUTS[dashCut].map(p=>[p[0],k%2?-p[1]:p[1]]), pts=wobPts(base,0.055,3), edge=wobPts(base,0.075,3);   /* one cut family per dash, mirrored on the alternate panels: consistent, flowing -- and torn, not ruled (VIS-16) */
-  o.parts=[shapeMesh(pts,0x14151c,1.0,b-1,null,fx),shapeMesh(edge,0x14151c,1.13,b,null,fx),shapeMesh(pts,0xffffff,1.0,b+1,null,fx),shapeMesh(pts,0xffffff,0.94,b+2,null,fx),shapeMesh(pts,0xffffff,0.9,b+3,tx,fx),shapeMesh(pts,0xffffff,0.9,b+2.9,ox,fx),
-    shapeMesh(edge,0x14151c,1.26,b-0.6,null,fx),shapeMesh(edge,0xffffff,1.2,b-0.5,null,fx),shapeMesh(wobPts(base,0.12,3),0x3a3c48,1.31,b-0.8,null,fx)];   // outer black line with a white gap: cartoon double outline; then one graphite pass outside it, the pencil under-stroke of the cut
-  o.parts[0].position.set(0.24,-0.26,0);
-  // speed lines in the clear margins: two above the head, two below the feet, along the motion
-  const lines=new THREE.Group(); lines.rotation.z=o.ang-o.tilt;
-  for(const [yy,frac] of [[0.47,0.8],[0.41,0.6],[-0.45,0.7],[-0.51,0.85]]){const y=yy*sp.h,x1=-sp.w*0.44,len=sp.w*0.88*frac,th=0.022;lines.add(shapeMesh([[x1,y-th],[x1+len,y],[x1,y+th]],0x14151c,1.0,b+2.5));}
-  lines.children.forEach(m=>o.parts.push(m)); inner.add(lines);
-  o.parts.slice(0,9).forEach(m=>inner.add(m)); o.obj.add(inner);
-  o.tails=[]; const hw=sp.w/2+0.12; for(const [yy,len,th] of [[-0.42,1.3,0.17],[0.05,1.8,0.22],[0.5,1.1,0.15]]){const L=len;const tl=shapeMesh([[-hw,yy-th],[-hw-L,yy],[-hw,yy+th]],0x14151c,1.0,b-2);const wl=shapeMesh([[-hw+0.02,yy-th*0.4],[-hw-L*0.72,yy],[-hw+0.02,yy+th*0.4]],0xffffff,1.0,b-2+0.5);o.tails.push(tl,wl);o.obj.add(tl,wl);}
-  // lines in the air around the panel: two streaks off the trailing corners, two short anticipation lines ahead of the leading edge
-  for(const [x0,yy,len,th] of [[-hw+0.05,sp.h*0.6,0.7,0.05],[-hw+0.05,-sp.h*0.6,0.6,0.05],[hw+0.25,0.28,-0.28,0.035],[hw+0.25,-0.22,-0.24,0.035]]){const st=shapeMesh([[x0,yy-th],[x0-len,yy+(len>0?0.04:-0.02)],[x0,yy+th]],0x14151c,1.0,b-2);o.tails.push(st);o.obj.add(st);}
-  o.inner=inner; o.perp=new THREE.Vector3(); ringFx(x,z,0.3,1.6,0.26,0xffffff);
-  o.k=k;o.tex=tx;o.life=o.max=sp.life;o.seq=++frameSeq;o.x=x;o.z=z;o.flip=fx;o.obj.visible=true;
-  o.obj.position.copy(frameAnchor(x,z,sp,fx));o.obj.quaternion.copy(camera.quaternion);o.obj.rotateZ(o.ang);o.obj.scale.set(1.45*o.size,0.85*o.size,1);for(const m of o.parts.concat(o.tails))m.material.opacity=1;
-  hatch(x,z,-P.dashDx,-P.dashDz,4,58);}
-function stepFrameCards(dt){dt=fxDt(dt);
+/* RENDER1 -- fxOrder(x,z,hw,top): the renderOrder a drawn effect standing at world (x,z) must take so the world sorts it like a body. Nothing in the
+   scene writes depth (every sprite is depthWrite:false); draw order IS the occlusion, in two bands (13): decor 1000+z*8 and actors 5000+z*8. Actors
+   always print over decor -- a figure behind a roof is x-rayed through it (occlusionTint), by design. An effect cannot live in one band and be right
+   against both: in the actor band a house in front never covers it; in the decor band an enemy BEHIND it prints over it. So it takes the actor band
+   (z-sorted against every enemy, the companion and the hero), unless its screen rectangle overlaps a prop or building that stands in front of it
+   (larger z) -- then it drops into the decor band at its own z, under that occluder and over every prop behind it. That is exactly the game's own
+   rule: the only things that can then print over it are actors behind it, which the game already shows through the roof. hw/top: the effect's
+   half-width and height in world units. The occluders' screen rectangles are projected once per rendered frame (occRects). */
+const _occR=[]; let _occStamp=-1;
+function occRects(){ const st=renderer.info.render.frame; if(st===_occStamp)return _occR; _occStamp=st; _occR.length=0;
   camUp.set(0,1,0).applyQuaternion(camera.quaternion);camRight.set(1,0,0).applyQuaternion(camera.quaternion);
-  for(const o of frameCards){if(o.life<=0)continue;o.life-=dt;if(o.life<=0){o.obj.visible=false;continue;}const t=1-o.life/o.max,sp=o.spec,kf=o.k-1;
-    const snap=1-easeOut(Math.min(1,t/0.12)), sx=1+0.45*snap, sy=1-0.15*snap, fade=t>0.86?1-easeIn((t-0.86)/0.14):1;
-    o.perp.copy(camRight).multiplyScalar(-Math.sin(o.ang)).addScaledVector(camUp,Math.cos(o.ang));                       // perpendicular to the motion on screen
-    o.obj.position.copy(frameAnchor(o.x,o.z,sp,o.flip)).addScaledVector(_fm.set(o.mx,0,o.mz),-easeOut(t)*0.55).addScaledVector(o.perp,(o.k%2?-1:1)*(0.34+easeOut(t)*0.46));   /* VIS-16: zig-zag across the path and FAN outward as it falls behind -- at a fixed 0.32 the two panels stacked into a triple image over the hero */
-    o.obj.quaternion.copy(camera.quaternion);o.obj.rotateZ(o.ang);o.obj.scale.set(sx*o.size,sy*o.size,1);
-    o.inner.rotation.z=-o.ang+o.tilt;                                                                    // slight tumble as it falls away
-    for(const m of o.parts)m.material.opacity=fade; o.parts[0].material.opacity=0.85*fade; o.parts[8].material.opacity=0.45*fade; if(o.otex)o.otex.offset.y=o.oy0+(SET.sketch>0?BOIL.ov:0)/OUTL_ROWS;   // the printed outline boils with the world
-    o.tails.forEach((tl,i)=>{tl.material.opacity=fade*(0.9-t*0.5);tl.scale.set(1+snap*0.9+(i>>1)*0.1,1,1);});}
+  for(const q of occluders){const g=q.grp; if(!g||!g.visible)continue; const sp=g.userData.sp; const h=q.h, w=q.w, cy=sp?sp.center.y:0.08;
+    _fa.set(q.x,0,q.z).addScaledVector(camRight,-w*0.5).addScaledVector(camUp,-h*cy).project(camera); const x0=_fa.x,y0=_fa.y;
+    _fa.set(q.x,0,q.z).addScaledVector(camRight,w*0.5).addScaledVector(camUp,h*(1-cy)).project(camera);
+    _occR.push(q.z,Math.min(x0,_fa.x),Math.max(x0,_fa.x),Math.min(y0,_fa.y),Math.max(y0,_fa.y));}
+  return _occR; }
+function fxOrder(x,z,hw,top){ const R=occRects();
+  _fa.set(x,0,z).addScaledVector(camRight,-hw).project(camera); const x0=_fa.x,y0=_fa.y;
+  _fm.set(x,0,z).addScaledVector(camRight,hw).addScaledVector(camUp,top).project(camera);
+  const ax=Math.min(x0,_fm.x),bx=Math.max(x0,_fm.x),ay=Math.min(y0,_fm.y),by=Math.max(y0,_fm.y);
+  for(let i=0;i<R.length;i+=5){ if(R[i]<=z+0.15)continue; if(R[i+2]<ax||R[i+1]>bx||R[i+4]<ay||R[i+3]>by)continue; return 1000+z*8-0.9; }   /* behind a prop: the decor band, under it (props sit on whole 1/8 buckets) */
+  let o=5000+z*8-0.6;   /* the actor band, a hair under a body standing at the same z */
+  if(spr&&Math.hypot(x-spr.grp.position.x,z-spr.grp.position.z)<2.6)o=Math.min(o,spr.sp.renderOrder-2);   /* the knight is never printed over by his own trail */
+  return o; }
+function frameCard(x,z,k,flip){const o=take(frameCards),fx=!!flip,key=spr.anim,sd=SHEETS[key]; if(!sd||!sheetTex[key])return;
+  if(o.tex)o.tex.dispose(); if(o.otex)o.otex.dispose();   // a recycled slot frees its two texture clones
+  const src=(SET.sketch>0?sheetOutl:(typeof sheetOutlPlain!=='undefined'?sheetOutlPlain:sheetOutl))[key]||sheetTex[key];
+  const tx=cloneTex(sheet(key)),ox=cloneTex(src),idx=Math.min(sd.n-1,2+k*2),rx=fx?-1/sd.n:1/sd.n,offx=fx?(idx+1)/sd.n:idx/sd.n;   // consecutive run drawings across the strip, the whole frame (no crop: a strobe is the figure, not a panel)
+  tx.repeat.set(rx,1);tx.offset.set(offx,0); ox.repeat.set(rx,src===sheetTex[key]?1:1/OUTL_ROWS); ox.offset.set(offx,0); o.oy0=0;
+  const an=SHEET_ANCHOR[key], ft=an?an.feet:spr.feet, cx=an?an.cx:spr.cx;
+  for(const s of [o.body,o.line]){s.material.map=s===o.body?tx:ox; s.material.needsUpdate=true; s.center.set(fx?1-cx:cx,ft); s.scale.set(spr.w,spr.h,1); s.material.rotation=spr.sp.material.rotation; s.position.set(0,0,0);}
+  o.tex=tx; o.otex=ox; o.ostack=src!==sheetTex[key]&&OUTL_ROWS>1; o.k=k; o.a0=[0.5,0.7,0.9][k]||0.7;   /* a multiple exposure: the oldest drawing faintest */
+  o.life=o.max=(FRAME_SPEC[k]||FRAME_SPEC[0]).life; o.seq=++frameSeq; o.x=x; o.z=z; o.flip=fx; o.hw=spr.w*0.13; o.top=spr.h*0.3;
+  o.obj.position.set(x,0,z); o.obj.visible=true; cardOrder(o); o.body.material.opacity=o.line.material.opacity=o.a0;
+  hatch(x,z,-P.dashDx,-P.dashDz,4,58); return o;}
+function cardOrder(o){const b=fxOrder(o.x,o.z,o.hw,o.top)+o.k*0.05; o.line.renderOrder=b-0.3; o.body.renderOrder=b;}   /* +k: at one z the newer drawing lies over the older */
+function stepFrameCards(dt){dt=fxDt(dt);
+  for(const o of frameCards){if(o.life<=0)continue;o.life-=dt;if(o.life<=0){o.obj.visible=false;continue;}const t=1-o.life/o.max;
+    const fade=t>0.7?1-easeIn((t-0.7)/0.3):1;   /* held, then gone: no drift, no tumble, no stretch -- it stays exactly where the knight was */
+    o.obj.position.set(o.x,0,o.z); cardOrder(o);
+    o.body.material.opacity=o.a0*fade; o.line.material.opacity=o.a0*fade;
+    if(o.ostack)o.otex.offset.y=(SET.sketch>0?BOIL.ov:0)/OUTL_ROWS;}   // the printed outline boils with the world
 }
 const warm=s=>{if(!s.userData.warm){s.material.needsUpdate=true;s.userData.warm=true;}};   // a material's program only changes when its map goes from nothing to something: bump needsUpdate once, never per spawn
 const ghostPools=[ghosts,fGhosts,smears];
@@ -1074,14 +1095,17 @@ const ghostPools=[ghosts,fGhosts,smears];
 function ghost(h,framed,fk,px,pz){const o=take(framed?fGhosts:ghosts);o.life=o.max=framed?FRAME_SPEC[fk].life:0.22;o.framed=!!framed;o.hard=false;o.hero=h===spr;o.obj.visible=true;const k=h.anim,sd=SHEETS[k],idx=Math.max(0,h.frame),b=o.body,ed=o.edge;b.visible=true;
   if(framed){if(!o.tex[k])o.tex[k]=cloneTex(sheet(k));const tx=o.tex[k],f=FRAME_SPEC[fk],[x0,x1,y0,y1]=f.crop;   // crop window into the sheet frame
     if(h.flip){tx.repeat.set(-(x1-x0)/sd.n,y1-y0);tx.offset.set((idx+x1)/sd.n,1-y1);} else {tx.repeat.set((x1-x0)/sd.n,y1-y0);tx.offset.set((idx+x0)/sd.n,1-y1);}
-    b.material.map=tx;warm(b);b.material.color.set(0xffffff);b.center.set(0.5,0.5);b.material.depthTest=false;b.scale.set((x1-x0)*h.w,(y1-y0)*h.h,1);b.position.set(0,0,0);b.material.rotation=f.rot;b.renderOrder=spr.sp.renderOrder-40+fk*8+5;
+    b.material.map=tx;warm(b);b.material.color.set(0xffffff);b.center.set(0.5,0.5);b.material.depthTest=false;b.scale.set((x1-x0)*h.w,(y1-y0)*h.h,1);b.position.set(0,0,0);b.material.rotation=f.rot;o.ro=-0.5;
     o.obj.position.copy(frameAnchor(px==null?h.grp.position.x:px,pz==null?h.grp.position.z:pz,f,h.flip));ed.visible=false;}
-  else {const gk=ghostKey(k);if(!o.tex[gk])o.tex[gk]=cloneTex(ghostLine(k));const tx=o.tex[gk],src=h.tex[k],on=SET.sketch>0;
+  else {o.ro=-1.7;const gk=ghostKey(k);if(!o.tex[gk])o.tex[gk]=cloneTex(ghostLine(k));const tx=o.tex[gk],src=h.tex[k],on=SET.sketch>0;
     tx.repeat.set(src.repeat.x,1/OUTL_ROWS);tx.offset.set(src.offset.x,OUTL_ROWS>1?(on?BOIL.ov:0)/OUTL_ROWS:0);   // the line reads the boiling row
     b.material.map=tx;warm(b);b.material.color.set(0xffffff);b.material.depthTest=true;   /* FIX4: ONE sprite, the hollow contour. The "edge" (sheetHalo tinted paper) is gone from the free ghost: haloSheet is an ink RING round a paper fill and a tint multiplies, so it stayed an ink ring at 0.2 on every afterimage (the fix3 probe tested the tint, not the texture) */
     b.center.copy(h.sp.center);b.scale.copy(h.sp.scale);b.position.copy(h.sp.position);b.material.rotation=h.sp.material.rotation;
-    o.obj.position.copy(h.grp.position);if(px!=null){o.obj.position.x=px;o.obj.position.z=pz;}b.renderOrder=h.sp.renderOrder-1.7;ed.visible=false;}   /* FIX4: UNDER the actor's halo (-1.5): his paper gap + ink rim cut him out of his own trail, so a ghost on his position shows nothing */
-  return o;}
+    o.obj.position.copy(h.grp.position);if(px!=null){o.obj.position.x=px;o.obj.position.z=pz;}ed.visible=false;}   /* FIX4: UNDER the actor's halo (-1.5): his paper gap + ink rim cut him out of his own trail, so a ghost on his position shows nothing */
+  ghostOrder(o); return o;}
+/* RENDER1: an afterimage or smear sorts by WHERE IT IS (fxOrder), like the dash strobe -- it used to take the actor's own order at spawn, so a trail left
+   beside a house or behind an enemy printed over them. ro keeps its place under the body line it was drawn from */
+function ghostOrder(o){const b=o.body; b.renderOrder=fxOrder(o.obj.position.x,o.obj.position.z,Math.abs(b.scale.x)*0.13,Math.abs(b.scale.y)*0.3)+(o.ro||0);}
 // smear frames: for two drawings (1/12 s) the hit body is one silhouette stretched along the blow, over the body, with two ink multiples trailing behind it: the classic smear of a heavy hit.
 // mult=0 gives just the stretched drawing (the stinger); the stun uses the multiples only (opposite the hit)
 function smear(h,nx,nz,mode){const k=h.anim;if(!h.tex[k])return;const [,,sa]=screenAngle(h.grp.position.x,h.grp.position.z,nx,nz);
@@ -1093,10 +1117,10 @@ function smear(h,nx,nz,mode){const k=h.anim;if(!h.tex[k])return;const [,,sa]=scr
     const b=o.body,ed=o.edge;b.material.map=tx;warm(b);b.material.color.set(0xffffff);b.material.depthTest=true;   /* FIX4: the hollow contour alone, no halo edge (see ghost()) */
     b.center.set(0.5,0.5);b.material.rotation=i?h.sp.material.rotation:-sa;b.scale.set(h.sp.scale.x*(i?1:1.9),h.sp.scale.y*(i?1:0.62),1);b.position.copy(h.sp.position).addScaledVector(camUp,mid).addScaledVector(camRight,midx);
     o.obj.position.copy(h.grp.position);o.obj.position.x-=nx*(0.45+0.3*i);o.obj.position.z-=nz*(0.45+0.3*i);   /* FIX3/FIX4: EVERY copy trails behind the blow; the stretched one starts 0.45 back so its leading end clears the body */
-    b.visible=true;ed.visible=false;o.a0=(i?0.3:0.5)*inkMix(0.72,1);   /* FIX4: a hollow line carries more alpha than a filled silhouette could and still never masses */b.renderOrder=h.sp.renderOrder-1.7-0.2*i;}}   /* under the body AND its halo */
+    b.visible=true;ed.visible=false;o.a0=(i?0.3:0.5)*inkMix(0.72,1);   /* FIX4: a hollow line carries more alpha than a filled silhouette could and still never masses */o.ro=-1.7-0.2*i;ghostOrder(o);}}   /* under the body AND its halo */
 function stepGhosts(dt){dt=fxDt(dt);const k=(SET.sketch>0?1:0.6)*inkMix(0.5,1);   /* INK_D (see the dial above): the free afterimage trail is the grey cloud around a swinging knight -- the dial thins every step of its fade. Hard ghosts (o.hard: the dash smear, the perfect-dodge fan) keep their own a0 */for(const p of ghostPools)for(const o of p){if(o.life<=0)continue;o.life-=dt;if(o.life<=0){o.obj.visible=false;continue;}const t=1-o.life/o.max;let a;
     if(o.framed)a=t>0.88?1-easeIn((t-0.88)/0.12):1; else if(o.hard)a=Math.min(0.55,o.a0||1); else if(o.hero)a=[0.55,0.28][Math.min(1,Math.floor(t*2))]*k; else a=[0.6,0.38,0.2][Math.min(2,Math.floor(t*3))]*k;   // afterimages fade in hard steps, never a tween. FIX4: HOLLOW lines now (12's ringStack), so they carry more alpha than the old filled silhouettes and still never mass
-    o.body.material.opacity=a;o.edge.material.opacity=o.framed?a:0;}}   /* FIX4: a free ghost has no edge sprite */
+    o.body.material.opacity=a;o.edge.material.opacity=o.framed?a:0;ghostOrder(o);}}   /* FIX4: a free ghost has no edge sprite */
 function behindDecor(x,z){const ps=(typeof camPitchK==='number'&&camPitchK!==0)
     ? Math.sin(camPitchK>0
         ? Math.atan2(lerp(T.CAM_OFF.y,CAMF.PITCH_Y,camPitchK),lerp(T.CAM_OFF.z,CAMF.PITCH_Z,camPitchK))
@@ -3630,12 +3654,16 @@ const WIND_F=[0,2,4,6,6,6];                                   // the wind-up's e
 const DIE_AL=[1,0.66,0.33,0], DIE_SQ=[0.85,0.6,0.45,0.45];    // the death: erased in three hard steps, flattening as it goes
 const GHOST_GAP=0.55;   /* FIX4: a trail afterimage (the lunge's, the dash's) is only laid once the knight has MOVED this far from the last one -- never on his own position, never stacked while he swings on the spot */
 let ghX=1e9, ghZ=1e9;
+/* RENDER1 -- the dash strobe's slots (the user: "the 3 frames for dashing are simply too spread apart and should be more on one line"). The three
+   frame cards sit ON the dash line, one behind the other, DASH_GAP apart (render1b: 1.7 tiles against a 2.25-tile body, so neighbours overlap by at most ~25% and each drawing reads on its own), ending DASH_LEAD behind where a full dash stops. Measured from the dash origin along its direction: no perpendicular offset, no fan. */
+const DASH_LEN=T.DASH_V*T.DASH_T, DASH_GAP=1.7, DASH_LEAD=1.7, dashSlot=k=>DASH_LEN-DASH_LEAD-DASH_GAP*(2-k);
+const dashCards=[null,null,null]; let dashOn=false, dashPrevT=0, dashMx=0, dashMz=0, dashOX=0, dashOZ=0;
 function trailGhost(x,z){ if(Math.hypot(x-ghX,z-ghZ)<GHOST_GAP)return null; ghX=x; ghZ=z; return ghost(spr,false); }
 const MULT_BACK=0.38;   /* FIX3: the sweep/stinger "multiples" were two or three copies of the knight rotated IN PLACE on his own body, each one a solid-ink silhouette (15's ghost edge) -- the black mass mid-swing. Now ONE faint line drawing, this far BEHIND the blow */
 const HURT_SHEET={knight:null,archer:'undeadHurt'};           // real hurt drawings (CLS.hurt wins once HOOKS-anim's CLS entries land)
 let turnK=0, strikeSnap=false, multDone=false, smashT=0, slamT=0, holdT=0, heroShiv=0, runFrame=-1, pAtkId=-1, pDash=0, pCast=0, pHurt=0, pFacing=1, rigPulse=0;
 // a new run: the hero's pose state starts clean (startGame should call this; see HOOKS-anim.md)
-function animReset(){ ghX=ghZ=1e9;sclY=1;sclV=0;rigPulse=0;outlPulse=0;turnK=0;strikeSnap=false;multDone=false;smashT=0;slamT=0;holdT=0;heroShiv=0;runFrame=-1;pAtkId=-1;pDash=0;pCast=0;pHurt=0;pFacing=P.facing;heroTick=0;dashFrameK=-1;trailT=0; if(spr)spr.posed=false; }
+function animReset(){ ghX=ghZ=1e9;sclY=1;sclV=0;rigPulse=0;outlPulse=0;turnK=0;strikeSnap=false;multDone=false;smashT=0;slamT=0;holdT=0;heroShiv=0;runFrame=-1;pAtkId=-1;pDash=0;pCast=0;pHurt=0;pFacing=P.facing;heroTick=0;dashFrameK=-1;dashOn=false;trailT=0; if(spr)spr.posed=false; }
 // an afterimage whose slot we can reach: ghost() (15) does not return it, so the free slot it is about to take is noted first; a returned object (if 15 grows one) wins
 function ghostOf(h,rot,life,ox,oz){ let o=null; for(const g of ghosts){if(g.life<=0){o=g;break;}} const r=ghost(h,false); if(r&&r.obj)o=r; else if(o&&o.life<=0)o=null; if(!o)return null;
   if(rot){ const q=o.obj.material?o.obj:null; if(q)q.material.rotation+=rot; else { if(o.body)o.body.material.rotation+=rot; if(o.edge)o.edge.material.rotation+=rot; } }   // a sprite ghost, or 15's ink-rim Group of two
@@ -3721,7 +3749,7 @@ function renderUpdate(rdt,alpha){
   let ovr=false; if(smashT>0){smashT-=rdt;poseSX*=1.28;poseSY*=1.28;ovr=true;if(smashT<=0){sclY=1.16;sclV=-5;holdT=AN.holdT;forceStep();}}   // the crit smash: one extreme drawing in real time (it survives hitstop and prints on the kill card), over the gate, then rung down
   if(ANIM.step||!spr.posed||ovr)spr.setScale(poseSX,poseSY);
   const bobY=rp?rp[2]:0; outlPulse=expd(outlPulse,0,16,rdt); if(fullDraw)outlPulse=Math.max(outlPulse,0.85);
-  { const vis=spr.sp.visible; for(const q of spr.rig)q.visible=vis; }   /* visibility is the i-frame blink and stays per-frame */
+  { const vis=spr.sp.visible, hv=vis&&SET.sketch<=0; for(const q of spr.outl)q.visible=vis; for(const q of spr.halo)q.visible=hv; }   /* RENDER1: the halo (haloSheet: paper gap + ink rim) is the WHITE RING round the knight -- this per-frame copy re-showed it after refreshSketch hid it. On the page his outline line is the only contour; OFF keeps the halo */   /* visibility is the i-frame blink and stays per-frame */
   // SM-1: the swell was written EVERY frame off a continuously decaying outlPulse while the body it outlines only moves on
   // the pose beat, so the ink line crept in and out around a held drawing -- a continuous value fighting a stepped one.
   // The pulse still decays in real time; the DRAWN swell is sampled on the beat with everything else.
@@ -3757,9 +3785,18 @@ function renderUpdate(rdt,alpha){
   spr.flash.material.color.set(P.hurtT>0?0xff4a3a:P.parryFlash>0?0xfff0c0:fullDraw?0xffe08a:0xffffff); spr.flash.material.opacity=P.hurtT>0?clamp(P.hurtT/T.HURT_T,0,1)*0.9:P.parryFlash>0?Math.min(1,P.parryFlash/0.12)*0.85:fullDraw?0.2+0.16*Math.sin(chargeT*22):P.dashFlash*10;   // a white blink on the launch and on a parry; a gold pulse on a full draw
   // afterimages and dust. Each ghost is one drawing behind the last (spawned on the beat, not a timer); the sweep and the stinger draw three bodies in one frame
   trailT-=rdt;
-  if(P.dashT>0){ if(dashFrameK<0&&typeof smear==='function')smear(spr,P.dashDx,P.dashDz,'one');   // the launch: one drawing stretched along the dash (15's smear pool), under the first frame card
-    if(ANIM.step){const u=1-P.dashT/T.DASH_T,k=u<0.36?0:u<0.72?1:2;if(k!==dashFrameK){dashFrameK=k;frameCard(vx,vz,k,spr.flip);}else trailGhost(vx,vz);mark(vx-P.dashDx*0.6,vz-P.dashDz*0.6,Math.atan2(P.dashDz,P.dashDx),false);} }
-  else { dashFrameK=-1;
+  if(P.dashT>0){ const fresh=!dashOn||P.dashT>dashPrevT+1e-6||P.dashDx!==dashMx||P.dashDz!==dashMz; dashPrevT=P.dashT;
+    if(fresh){ dashOn=true; dashFrameK=-1; dashCards[0]=dashCards[1]=dashCards[2]=null; dashMx=P.dashDx; dashMz=P.dashDz; const u0=1-P.dashT/T.DASH_T; dashOX=vx-dashMx*u0*DASH_LEN; dashOZ=vz-dashMz*u0*DASH_LEN;   /* where this dash began: the strobe's line */
+      }   /* RENDER1b: no launch smear and no trail ghosts during a dash -- the strobe is exactly the three frame cards, nothing stacked on them */
+    if(ANIM.step){ const d=(vx-dashOX)*dashMx+(vz-dashOZ)*dashMz; let cut=false;
+      while(dashFrameK<2){ const sk=dashSlot(dashFrameK+1); if(d<sk+DASH_LEAD)break; dashFrameK++; cut=true; dashCards[dashFrameK]=frameCard(dashOX+dashMx*sk,dashOZ+dashMz*sk,dashFrameK,spr.flip); }   /* a card lands on its slot once the knight has cleared it */
+      mark(vx-P.dashDx*0.6,vz-P.dashDz*0.6,Math.atan2(P.dashDz,P.dashDx),false);} }
+  else { if(dashOn){ dashOn=false; const d=(vx-dashOX)*dashMx+(vz-dashOZ)*dashMz;   /* the dash is over: the strobe is laid out from where he actually stopped -- the cards not cut yet land now, and the ones already down
+      close up onto the same even spacing (a full dash moves them by a hair; a dash stopped by a wall or a body pulls them back so they never spread or bunch) */
+      for(let k=0;k<=2;k++){ const sk=d-DASH_LEAD-DASH_GAP*(2-k), cx=dashOX+dashMx*sk, cz=dashOZ+dashMz*sk, o=dashCards[k];
+        if(sk<-0.05){ if(k>dashFrameK)continue; }
+        if(k<=dashFrameK&&o&&o.life>0&&o.k===k){o.x=cx;o.z=cz;o.obj.position.set(cx,0,cz);} else if(k>dashFrameK)dashCards[k]=frameCard(cx,cz,k,spr.flip); } }
+    dashFrameK=-1;
     if(P.atk>=0&&!ranged){ const a=atkDef(P.atk);
       if(P.atkT>=a.wind&&!multDone){ multDone=true; if((a.sweep||P.atk===4)&&inkHas(0.3))ghostOf(spr,-0.16*P.facing,inkMix(0.07,0.1),-P.aimx*MULT_BACK,-P.aimz*MULT_BACK); }   /* FIX3: one faint trailing drawing behind the blow, never a stack on the body */
       else if(P.lunged&&ANIM.step&&P.atkT<a.wind+a.active+0.04&&inkHas(0.4))trailGhost(vx,vz); }   /* INK_D: the lunge's own trailing drawing goes first on a spare page. FIX4: distance-gated (GHOST_GAP) -- it used to print a copy on the body every beat of every swing */
@@ -5076,7 +5113,7 @@ function renderPanel(){
     placeCard(stud,r.cx+ox*c-oy*s_,r.cy+ox*s_+oy*c,18*S,18*S,r.ang+0.2,7);stud.material.opacity=a;} else stud.material.opacity=0;
   const ac=renderer.autoClear; renderer.autoClear=false; renderer.render(ov,ovCam); renderer.autoClear=ac;
 }
-window.__M=M; M._dbg={panelHome,panelRect,rectClear,get killChain(){return killChain;},get lastFeat(){return M.lastFeat;}}; window.__R2={frameCards,ghosts:fGhosts,FRAME_SPEC}; window.__R={renderer,rt,rt2,ov,ovCam,plate,stud,pic,pop,get SK(){return SK;},get sceneRT(){return sceneRT;}};
+window.__M=M; M._dbg={panelHome,panelRect,rectClear,get killChain(){return killChain;},get lastFeat(){return M.lastFeat;}}; window.__R2={frameCards,ghosts:fGhosts,smears,FRAME_SPEC,frameCard,fxOrder,occRects,occluders}; window.__R={renderer,rt,rt2,ov,ovCam,plate,stud,pic,pop,get SK(){return SK;},get sceneRT(){return sceneRT;}};
 
 // ---------------- HUD ----------------
 // Chrome on paper. Every box is hand-inked (three seeded variants of each line, cycled on the world's BOIL clock through body[data-boil]), the type is Bangers for POW/numerals and
@@ -5478,6 +5515,7 @@ function rebuildLadder(){const b=Math.min(window.devicePixelRatio||1,2);const f=
 function inkRung(){try{setInkScale(prLadder[prIdx]/prLadder[0]);}catch(e){}}   // PERF-5: every rung of the world's ladder is a rung of the ink canvas too
 function applyResize(){resizePending=false;dispBump();renderer.setSize(innerWidth,innerHeight,false);fitCamera();const dpr=window.devicePixelRatio||1;if(dpr!==lastDpr){lastDpr=dpr;rebuildLadder();}fitPost();}
 // SET.sketch 0/1/2 = OFF / LINES / FULL. refreshSketch() applies it: the page colour (clear, background, fog), the floor (paper or the pixel tile), the actors' drop shadow vs under-drawing, the pixel-ratio cap, the CSS class
+let simFreeze=false;
 function refreshSketch(){ const on=SET.sketch>0; try{document.body.classList.toggle('sketch',on);}catch(e){}
   clearColor=on?PAPER:SKY; renderer.setClearColor(clearColor,1); if(scene.background&&scene.background.isColor)scene.background.set(clearColor); if(scene.fog){scene.fog.color.set(clearColor);scene.fog.near=on?30:28;scene.fog.far=on?60:75;}
   if(floorMesh){const m=floorMesh.material;const want=on&&paperFloor?paperFloor:pixelFloorTex;if(m.map!==want){m.map=want;m.needsUpdate=true;}m.color.set(on&&paperFloor?0xffffff:0xdfe3c8);if(floorMesh2)floorMesh2.visible=on;if(edgePlane)edgePlane.visible=on;}
@@ -5488,6 +5526,7 @@ function refreshSketch(){ const on=SET.sketch>0; try{document.body.classList.tog
      not follow it onto the green grass. Props swap their bake by name; actors drop their outline clones and re-clone the other stack (13's reink) */
   for(const q of occluders){const g=q.grp,nm=g.userData.nat,sp=g.userData.sp;if(!nm||!sp||!natTex[nm])continue;const want=on?natTex[nm]:(natTexPlain[nm]||natTex[nm]);if(sp.material.map!==want){sp.material.map=want;sp.material.needsUpdate=true;}}
   for(const o of SPRITES){if(o.reink&&o._outlOn!==on){o._outlOn=on;o.reink();}}
+  if(spr&&spr.halo)for(const q of spr.halo)q.visible=!on;   /* RENDER1: the hero's always-on halo is haloSheet (a paper gap inside an ink rim) -- the white ring round him on the page. His outline stack already carries one dark contour; OFF keeps the halo it always had */
   rebuildLadder(); }
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){for(const k in keys)keys[k]=false;togglePause(true);} else {last=performance.now();acc=0;emaMs=dispMs;dispBump();} });   // no catch-up burst after a tab switch; the game waits for you
 addEventListener('blur',()=>{togglePause(true);});
@@ -5525,7 +5564,7 @@ function frame(now){
       hsK=(hitstop>rmp||rmp<=0)?CAMF.STOP_HOLD:CAMF.STOP_HOLD+(1-CAMF.STOP_HOLD)*Math.pow(smooth(1-hitstop/rmp),2);
       hitstop=Math.max(0,hitstop-rdt); if(hitstop<=0)hsLen=0; } else hsLen=0;
     sinceHitstop+=rdt; let hs0=hitstop;
-    acc+=rdt*timeScale; let steps=0;
+    acc+=simFreeze?0:rdt*timeScale; let steps=0;   /* RENDER1: __HV.freeze holds the sim (harness only) so a frame can be photographed at 2 fps */
     while(acc>=T.DT&&steps<10){
       const sdt=T.DT*hsK;
       // RB-02: the sim is guarded exactly as hudTick is. A throw anywhere in here used to escape frame() before `acc-=T.DT`,
@@ -5561,7 +5600,7 @@ boot().catch(e=>{document.getElementById('sub').textContent='load failed: '+e.me
 window.__HV={CLARITY,clMix,FLOOR_TINT,COLOUR_SAT,SHADOW_HATCH,SHADOW_LO,WASH_Q,CURVE_K,P,enemies,T,cam,startGame,travel,scene,AR,ARC,arrowPool,camera,toScreen,keys,portals,ULT,SET,WAVE,applyRoster,crates,pickups,BOIL,SK,present,refreshSketch,fitPost,SPRITES,
   texCensus(){let rig=0;for(const o of SPRITES)for(const c of [o.tex,o.otex,o.utex,o.htex])if(c)rig+=Object.keys(c).length;   /* PERF-1: what the actor rigs are actually holding, vs renderer.info.memory.textures */
     const bound=new Set();try{scene.traverse(q=>{const m=q.material;if(!m)return;for(const mm of (Array.isArray(m)?m:[m]))if(mm&&mm.map)bound.add(mm.map);});}catch(e){}
-    return {rigs:SPRITES.length,rigClones:rig,boundInScene:bound.size,gl:renderer.info.memory.textures};},get timeScale(){return timeScale;},get paused(){return paused;},get zoom(){return camZoom;},get hitstop(){return hitstop;},get running(){return running;},get prIdx(){return prIdx;},set prIdx(v){prIdx=clamp(v|0,0,prLadder.length-1);renderer.setPixelRatio(prLadder[prIdx]);fitPost();inkRung();},get ladderLock(){return ladderLock;},set ladderLock(v){ladderLock=!!v;},get impactT(){return impactT;},set impactT(v){impactT=+v||0;},ANIM,commitPose,animClock,
+    return {rigs:SPRITES.length,rigClones:rig,boundInScene:bound.size,gl:renderer.info.memory.textures};},get timeScale(){return timeScale;},get freeze(){return simFreeze;},set freeze(v){simFreeze=!!v;acc=0;},get paused(){return paused;},get zoom(){return camZoom;},get hitstop(){return hitstop;},get running(){return running;},get prIdx(){return prIdx;},set prIdx(v){prIdx=clamp(v|0,0,prLadder.length-1);renderer.setPixelRatio(prLadder[prIdx]);fitPost();inkRung();},get ladderLock(){return ladderLock;},set ladderLock(v){ladderLock=!!v;},get impactT(){return impactT;},set impactT(v){impactT=+v||0;},ANIM,commitPose,animClock,
   CAMF,KC,BOSSCAM,slowReq,killCam,bossCam,camReset,camPunch,get LB(){return LB;},get camRoll(){return camRoll;},get camKick(){return camKick;},get trauma(){return trauma;},set trauma(v){trauma=+v||0;},get slowT(){return slowT;},get camPitchK(){return camPitchK;},get kcH(){return kcH;},get bcH(){return bcH;},
   CAMP,lensKick,pageKick,get camFovK(){return camFovK;},get camFovBase(){return camFovBase;},get camFov(){return camera.fov;},get camLean(){return camLean;},get idleK(){return idleK;},get pageTilt(){return{x:pgX+pgPx,z:pgZ+pgPz,sx:pgX,sz:pgZ};},get camDist(){return Math.hypot(camera.position.x-cam.x,camera.position.y-T.LOOK_DY,camera.position.z-cam.z);},   /* the perspective layer, for the harness: the lens multiplier, the page's two tilt angles, the dutch lean and the camera's actual distance from what it is looking at */
   impactFrame,SHK,ZK,hurtPlayer,playerDie,heal,decal,clearRunFx,warmStep,fireArrow,dmgNum,shout,onHit,impact,get inkText(){return{words:_word.size,wordPx:_wordPx,glyphs:_glyph.size};},get dispMs(){return dispMs;},get emaMs(){return emaMs;},get runT(){return runT;},get kills(){return kills;},get bestChain(){return bestChain;},get hitChain(){return hitChain;}};   // the harness drives the settings, the death path and the sheet warmer through these
